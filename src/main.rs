@@ -8,20 +8,24 @@ const ADDRESS: &str = "0.0.0.0:9999";
 struct Service {
     unit: &'static str,
     name: &'static str,
+    port_hint: Option<&'static str>,
 }
 
 const SERVICES: &[Service] = &[
     Service {
         unit: "iploc.service",
         name: "IP Location",
+        port_hint: Some("3000"),
     },
     Service {
         unit: "live.service",
         name: "Live Status",
+        port_hint: Some("9999"),
     },
     Service {
         unit: "sym_notes.service",
         name: "Sym Notes",
+        port_hint: Some("3444"),
     },
 ];
 
@@ -208,11 +212,11 @@ fn page() -> String {
 
 fn service_row(service: &Service) -> String {
     let state = service_state(service.unit);
-    let ports = service_ports(service.unit).join(", ");
-    let ports = if ports.is_empty() {
-        "none".to_owned()
+    let detected_ports = service_ports(service.unit);
+    let ports = if detected_ports.is_empty() {
+        service.port_hint.unwrap_or("none").to_owned()
     } else {
-        ports
+        detected_ports.join(", ")
     };
     let class = match state.as_str() {
         "active" => "pill-active",
