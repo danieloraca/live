@@ -1,0 +1,15 @@
+[Unit]
+Description=Raspberry Pi status page
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=danutz
+WorkingDirectory=/home/danutz/Development/live
+ExecStart=/home/danutz/Development/live/target/release/live
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

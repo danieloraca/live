@@ -2,6 +2,12 @@
 
 Tiny Rust status page intended to run on a Raspberry Pi.
 
+The page shows the current `systemd` state and listening ports for:
+
+- `iploc.service`
+- `live.service`
+- `sym_notes.service`
+
 ## Run
 
 ```sh
