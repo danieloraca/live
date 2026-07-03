@@ -18,6 +18,11 @@ const SERVICES: &[Service] = &[
         port_hint: Some("3000"),
     },
     Service {
+        unit: "id-generator.service",
+        name: "ID Generator",
+        port_hint: Some("3012"),
+    },
+    Service {
         unit: "live.service",
         name: "Live Status",
         port_hint: Some("9999"),
