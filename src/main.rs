@@ -34,10 +34,10 @@ const SERVICES: &[Service] = &[
     },
 ];
 
-fn page() -> String {
+fn page(host: &str) -> String {
     let services = SERVICES
         .iter()
-        .map(service_row)
+        .map(|service| service_row(service, host))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -128,6 +128,11 @@ fn page() -> String {
       display: block;
       color: #eef3f8;
       font-weight: 700;
+      text-decoration: none;
+    }
+
+    .service-name:hover {
+      text-decoration: underline;
     }
 
     .service-unit {
@@ -215,7 +220,7 @@ fn page() -> String {
     .replace("{services}", &services)
 }
 
-fn service_row(service: &Service) -> String {
+fn service_row(service: &Service, host: &str) -> String {
     let state = service_state(service.unit);
     let detected_ports = service_ports(service.unit);
     let ports = if detected_ports.is_empty() {
@@ -229,17 +234,28 @@ fn service_row(service: &Service) -> String {
         "failed" => "pill-failed",
         _ => "pill-unknown",
     };
+    let name = match link_port(&detected_ports, service.port_hint) {
+        Some(port) => format!(
+            r#"<a class="service-name" target="_blank" href="{}">{}</a>"#,
+            escape_html(&service_url(host, &port)),
+            escape_html(service.name)
+        ),
+        None => format!(
+            r#"<span class="service-name">{}</span>"#,
+            escape_html(service.name)
+        ),
+    };
 
     format!(
         r#"<article class="service">
         <div>
-          <span class="service-name">{}</span>
+          {}
           <span class="service-unit">{}</span>
         </div>
         <span class="service-ports">{}</span>
         <span class="pill {class}">{}</span>
       </article>"#,
-        escape_html(service.name),
+        name,
         escape_html(service.unit),
         escape_html(&ports),
         escape_html(&state)
@@ -312,6 +328,33 @@ fn local_port(address: &str) -> Option<String> {
     }
 }
 
+fn link_port(detected_ports: &[String], port_hint: Option<&str>) -> Option<String> {
+    detected_ports
+        .first()
+        .cloned()
+        .or_else(|| port_hint.map(ToOwned::to_owned))
+}
+
+fn service_url(host: &str, port: &str) -> String {
+    format!("http://{}:{}/", host_without_port(host), port)
+}
+
+fn request_host(request: &str) -> &str {
+    request
+        .lines()
+        .find_map(|line| line.strip_prefix("Host: "))
+        .unwrap_or("127.0.0.1")
+        .trim()
+}
+
+fn host_without_port(host: &str) -> &str {
+    if host.starts_with('[') {
+        return host.find(']').map(|index| &host[..=index]).unwrap_or(host);
+    }
+
+    host.split(':').next().unwrap_or(host)
+}
+
 fn escape_html(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -340,10 +383,11 @@ fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
     let bytes_read = stream.read(&mut buffer)?;
     let request = String::from_utf8_lossy(&buffer[..bytes_read]);
     let first_line = request.lines().next().unwrap_or_default();
+    let host = request_host(&request);
 
     let (status, body, content_type) =
         if first_line.starts_with("GET / ") || first_line.starts_with("GET /index.html ") {
-            ("HTTP/1.1 200 OK", page(), "text/html; charset=utf-8")
+            ("HTTP/1.1 200 OK", page(host), "text/html; charset=utf-8")
         } else {
             (
                 "HTTP/1.1 404 Not Found",
