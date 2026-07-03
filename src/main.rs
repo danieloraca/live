@@ -23,6 +23,11 @@ const SERVICES: &[Service] = &[
         port_hint: Some("3012"),
     },
     Service {
+        unit: "tetris.service",
+        name: "Tetris",
+        port_hint: Some("3020"),
+    },
+    Service {
         unit: "sym_notes.service",
         name: "Sym Notes",
         port_hint: Some("3444"),
