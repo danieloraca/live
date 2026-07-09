@@ -33,6 +33,11 @@ const SERVICES: &[Service] = &[
         port_hint: Some("3021"),
     },
     Service {
+        unit: "trader-dashboard.service",
+        name: "Trader Dashboard",
+        port_hint: Some("3040"),
+    },
+    Service {
         unit: "sym_notes.service",
         name: "Sym Notes",
         port_hint: Some("3444"),
