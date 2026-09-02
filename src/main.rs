@@ -43,6 +43,11 @@ const SERVICES: &[Service] = &[
         port_hint: Some("3444"),
     },
     Service {
+        unit: "jirpi",
+        name: "JiraPi",
+        port_hint: Some("5644"),
+    },
+    Service {
         unit: "live.service",
         name: "Live Status",
         port_hint: Some("9999"),
