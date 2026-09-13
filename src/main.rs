@@ -1,426 +1,198 @@
-use std::collections::BTreeSet;
+mod metrics;
+mod services;
+mod util;
+
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::Command;
+use std::sync::{Arc, Mutex, RwLock, mpsc};
+use std::thread;
+use std::time::{Duration, Instant};
 
-const ADDRESS: &str = "0.0.0.0:9999";
+const INTERVAL: Duration = Duration::from_secs(5);
+const HISTORY_LIMIT: usize = 721;
 
-struct Service {
-    unit: &'static str,
-    name: &'static str,
-    port_hint: Option<&'static str>,
-}
-
-const SERVICES: &[Service] = &[
-    Service {
-        unit: "iploc.service",
-        name: "IP Location",
-        port_hint: Some("3000"),
-    },
-    Service {
-        unit: "id-generator.service",
-        name: "ID Generator",
-        port_hint: Some("3012"),
-    },
-    Service {
-        unit: "tetris.service",
-        name: "Tetris",
-        port_hint: Some("3020"),
-    },
-    Service {
-        unit: "solitaire.service",
-        name: "Solitaire",
-        port_hint: Some("3021"),
-    },
-    Service {
-        unit: "trader-dashboard.service",
-        name: "Trader Dashboard",
-        port_hint: Some("3040"),
-    },
-    Service {
-        unit: "sym_notes.service",
-        name: "Sym Notes",
-        port_hint: Some("3444"),
-    },
-    Service {
-        unit: "jirpi",
-        name: "JiraPi",
-        port_hint: Some("5644"),
-    },
-    Service {
-        unit: "live.service",
-        name: "Live Status",
-        port_hint: Some("9999"),
-    },
-];
-
-fn page(host: &str) -> String {
-    let services = SERVICES
-        .iter()
-        .map(|service| service_row(service, host))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pi Status</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #101418;
-      color: #eef3f8;
-    }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      box-sizing: border-box;
-    }
-
-    main {
-      width: min(100%, 820px);
-      border: 1px solid #33404c;
-      border-radius: 8px;
-      padding: 28px;
-      background: #172029;
-      box-shadow: 0 16px 40px rgb(0 0 0 / 30%);
-    }
-
-    h1 {
-      margin: 0 0 10px;
-      font-size: 32px;
-      line-height: 1.15;
-    }
-
-    p {
-      margin: 0;
-      color: #b8c7d6;
-      font-size: 16px;
-      line-height: 1.5;
-    }
-
-    .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 18px;
-      color: #7ddc9a;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-size: 13px;
-    }
-
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: currentColor;
-      box-shadow: 0 0 18px currentColor;
-    }
-
-    .services {
-      display: grid;
-      gap: 10px;
-      margin-top: 28px;
-    }
-
-    .service {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(100px, auto) auto;
-      gap: 14px;
-      align-items: center;
-      padding: 14px 16px;
-      border: 1px solid #33404c;
-      border-radius: 8px;
-      background: #111820;
-    }
-
-    .service-name {
-      display: block;
-      color: #eef3f8;
-      font-weight: 700;
-      text-decoration: none;
-    }
-
-    .service-name:hover {
-      text-decoration: underline;
-    }
-
-    .service-unit {
-      display: block;
-      margin-top: 3px;
-      color: #8fa2b5;
-      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-      font-size: 13px;
-      overflow-wrap: anywhere;
-    }
-
-    .service-ports {
-      color: #d8e3ee;
-      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-      font-size: 13px;
-      text-align: right;
-      white-space: nowrap;
-    }
-
-    .pill {
-      border-radius: 999px;
-      padding: 5px 10px;
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      white-space: nowrap;
-    }
-
-    .pill-active {
-      background: #12351f;
-      color: #7ddc9a;
-    }
-
-    .pill-inactive {
-      background: #3a2f16;
-      color: #ffd36a;
-    }
-
-    .pill-failed {
-      background: #3a1717;
-      color: #ff8a8a;
-    }
-
-    .pill-unknown {
-      background: #26313d;
-      color: #b8c7d6;
-    }
-
-    @media (max-width: 560px) {
-      main {
-        padding: 22px;
-      }
-
-      h1 {
-        font-size: 28px;
-      }
-
-      .service {
-        grid-template-columns: 1fr;
-      }
-
-      .service-ports {
-        text-align: left;
-      }
-
-      .pill {
-        width: max-content;
-      }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <div class="status"><span class="dot"></span> Online</div>
-    <h1>Raspberry Pi Status</h1>
-    <p>This page is being served by a small Rust process on port 9999.</p>
-    <section class="services" aria-label="Services">
-      {services}
-    </section>
-  </main>
-</body>
-</html>
-"#
-    .replace("{services}", &services)
-}
-
-fn service_row(service: &Service, host: &str) -> String {
-    let state = service_state(service.unit);
-    let detected_ports = service_ports(service.unit);
-    let ports = if detected_ports.is_empty() {
-        service.port_hint.unwrap_or("none").to_owned()
-    } else {
-        detected_ports.join(", ")
-    };
-    let class = match state.as_str() {
-        "active" => "pill-active",
-        "inactive" => "pill-inactive",
-        "failed" => "pill-failed",
-        _ => "pill-unknown",
-    };
-    let name = match link_port(&detected_ports, service.port_hint) {
-        Some(port) => format!(
-            r#"<a class="service-name" target="_blank" href="{}">{}</a>"#,
-            escape_html(&service_url(host, &port)),
-            escape_html(service.name)
-        ),
-        None => format!(
-            r#"<span class="service-name">{}</span>"#,
-            escape_html(service.name)
-        ),
-    };
-
-    format!(
-        r#"<article class="service">
-        <div>
-          {}
-          <span class="service-unit">{}</span>
-        </div>
-        <span class="service-ports">{}</span>
-        <span class="pill {class}">{}</span>
-      </article>"#,
-        name,
-        escape_html(service.unit),
-        escape_html(&ports),
-        escape_html(&state)
-    )
-}
-
-fn service_state(unit: &str) -> String {
-    match Command::new("systemctl").args(["is-active", unit]).output() {
-        Ok(output) => {
-            let state = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-
-            if state.is_empty() {
-                "unknown".to_owned()
-            } else {
-                state
-            }
-        }
-        Err(_) => "unknown".to_owned(),
-    }
-}
-
-fn service_ports(unit: &str) -> Vec<String> {
-    let Some(pid) = service_main_pid(unit) else {
-        return Vec::new();
-    };
-
-    let Ok(output) = Command::new("ss").args(["-H", "-ltnup"]).output() else {
-        return Vec::new();
-    };
-
-    let sockets = String::from_utf8_lossy(&output.stdout);
-    let pid_pattern = format!("pid={pid},");
-    let mut ports = BTreeSet::new();
-
-    for line in sockets.lines().filter(|line| line.contains(&pid_pattern)) {
-        let parts = line.split_whitespace().collect::<Vec<_>>();
-
-        if parts.len() < 5 {
-            continue;
-        }
-
-        if let Some(port) = local_port(parts[4]) {
-            ports.insert(port);
-        }
-    }
-
-    ports.into_iter().collect()
-}
-
-fn service_main_pid(unit: &str) -> Option<u32> {
-    let output = Command::new("systemctl")
-        .args(["show", unit, "--property=MainPID", "--value"])
-        .output()
-        .ok()?;
-
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<u32>()
-        .ok()
-        .filter(|pid| *pid > 0)
-}
-
-fn local_port(address: &str) -> Option<String> {
-    let port = address.rsplit(':').next()?.trim_matches(']');
-
-    if port.is_empty() || port == "*" {
-        None
-    } else {
-        Some(port.to_owned())
-    }
-}
-
-fn link_port(detected_ports: &[String], port_hint: Option<&str>) -> Option<String> {
-    detected_ports
-        .first()
-        .cloned()
-        .or_else(|| port_hint.map(ToOwned::to_owned))
-}
-
-fn service_url(host: &str, port: &str) -> String {
-    format!("http://{}:{}/", host_without_port(host), port)
-}
-
-fn request_host(request: &str) -> &str {
-    request
-        .lines()
-        .find_map(|line| line.strip_prefix("Host: "))
-        .unwrap_or("127.0.0.1")
-        .trim()
-}
-
-fn host_without_port(host: &str) -> &str {
-    if host.starts_with('[') {
-        return host.find(']').map(|index| &host[..=index]).unwrap_or(host);
-    }
-
-    host.split(':').next().unwrap_or(host)
-}
-
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
+#[derive(Default)]
+struct State {
+    status: String,
+    history: VecDeque<String>,
 }
 
 fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind(ADDRESS)?;
-    println!("Serving status page at http://{ADDRESS}");
+    let address = std::env::var("LIVE_ADDRESS").unwrap_or_else(|_| "0.0.0.0:9999".into());
+    let listener = TcpListener::bind(&address)?;
+    let state = Arc::new(RwLock::new(State::default()));
+    let sampler_state = Arc::clone(&state);
+    thread::spawn(move || sample(sampler_state));
 
+    // A bounded queue and read deadlines keep slow clients from blocking the page.
+    let (sender, receiver) = mpsc::sync_channel::<TcpStream>(32);
+    let receiver = Arc::new(Mutex::new(receiver));
+    for _ in 0..4 {
+        let receiver = Arc::clone(&receiver);
+        let state = Arc::clone(&state);
+        thread::spawn(move || {
+            loop {
+                let stream = receiver.lock().unwrap().recv();
+                let Ok(stream) = stream else { break };
+                if let Err(error) = handle_connection(stream, &state) {
+                    eprintln!("Request failed: {error}");
+                }
+            }
+        });
+    }
+    println!("Serving Pi Status at http://{address}");
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => handle_connection(stream)?,
+            Ok(stream) => {
+                let _ = sender.try_send(stream);
+            }
             Err(error) => eprintln!("Connection failed: {error}"),
         }
     }
-
     Ok(())
 }
 
-fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
+fn sample(state: Arc<RwLock<State>>) {
+    let mut collector = metrics::Collector::new();
+    let mut service_data = "[]".to_owned();
+    let mut services_updated_at = 0;
+    let mut cycle = 0u64;
+    loop {
+        let started = Instant::now();
+        if cycle.is_multiple_of(6) {
+            service_data = services::collect();
+            services_updated_at = util::now();
+        }
+        let snapshot = collector.collect(cycle.is_multiple_of(6));
+        let status = util::object(&[
+            ("metrics", snapshot.json()),
+            ("system", collector.system.clone()),
+            ("services", service_data.clone()),
+            ("services_updated_at", services_updated_at.to_string()),
+        ]);
+        {
+            let mut state = state.write().unwrap();
+            state.status = status;
+            state.history.push_back(snapshot.point_json());
+            if state.history.len() > HISTORY_LIMIT {
+                state.history.pop_front();
+            }
+        }
+        cycle = cycle.wrapping_add(1);
+        thread::sleep(INTERVAL.saturating_sub(started.elapsed()));
+    }
+}
+
+fn route(path: &str, state: &RwLock<State>) -> (u16, &'static str, String) {
+    match path.split('?').next().unwrap_or(path) {
+        "/" | "/index.html" => (
+            200,
+            "text/html; charset=utf-8",
+            include_str!("../static/index.html").into(),
+        ),
+        "/style.css" => (
+            200,
+            "text/css; charset=utf-8",
+            include_str!("../static/style.css").into(),
+        ),
+        "/app.js" => (
+            200,
+            "text/javascript; charset=utf-8",
+            include_str!("../static/app.js").into(),
+        ),
+        "/api/status" => {
+            let state = state.read().unwrap();
+            if state.status.is_empty() {
+                (
+                    503,
+                    "application/json",
+                    "{\"error\":\"First sample is being collected\"}".into(),
+                )
+            } else {
+                (200, "application/json", state.status.clone())
+            }
+        }
+        "/api/history" => (
+            200,
+            "application/json",
+            format!(
+                "[{}]",
+                state
+                    .read()
+                    .unwrap()
+                    .history
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        ),
+        "/favicon.ico" => (204, "image/x-icon", String::new()),
+        _ => (404, "text/plain; charset=utf-8", "Not found\n".into()),
+    }
+}
+
+fn handle_connection(mut stream: TcpStream, state: &RwLock<State>) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    let mut request = Vec::new();
     let mut buffer = [0; 1024];
-    let bytes_read = stream.read(&mut buffer)?;
-    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-    let first_line = request.lines().next().unwrap_or_default();
-    let host = request_host(&request);
-
-    let (status, body, content_type) =
-        if first_line.starts_with("GET / ") || first_line.starts_with("GET /index.html ") {
-            ("HTTP/1.1 200 OK", page(host), "text/html; charset=utf-8")
-        } else {
-            (
-                "HTTP/1.1 404 Not Found",
-                "Not found\n".to_owned(),
-                "text/plain; charset=utf-8",
-            )
-        };
-
-    let response = format!(
-        "{status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while request.len() < 8192 && Instant::now() < deadline {
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(());
+        }
+        request.extend_from_slice(&buffer[..read]);
+        if request.windows(4).any(|part| part == b"\r\n\r\n") {
+            break;
+        }
+    }
+    if !request.windows(4).any(|part| part == b"\r\n\r\n") {
+        return Ok(());
+    }
+    let request = String::from_utf8_lossy(&request);
+    let mut first_line = request
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .split_whitespace();
+    let method = first_line.next().unwrap_or_default();
+    let path = first_line.next().unwrap_or_default();
+    let (status, content_type, body) = if method == "GET" || method == "HEAD" {
+        route(path, state)
+    } else {
+        (405, "text/plain", "Method not allowed\n".into())
+    };
+    let reason = match status {
+        200 => "OK",
+        204 => "No Content",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        _ => "Service Unavailable",
+    };
+    write!(
+        stream,
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n",
         body.len()
-    );
-
-    stream.write_all(response.as_bytes())?;
+    )?;
+    if method != "HEAD" {
+        stream.write_all(body.as_bytes())?;
+    }
     stream.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routes_report_warmup_and_do_not_return_html_for_missing_assets() {
+        let state = RwLock::new(State::default());
+        assert_eq!(route("/api/status", &state).0, 503);
+        assert_eq!(route("/missing.js", &state).0, 404);
+        assert_eq!(route("/api/history?test=1", &state).2, "[]");
+        assert!(route("/", &state).2.contains("Raspberry Pi"));
+    }
 }
