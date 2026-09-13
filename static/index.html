@@ -66,7 +66,7 @@
         </article>
       </div>
 
-      <div class="chart-toolbar"><span id="history-caption">Recent activity</span><div class="range-control" role="group" aria-label="Chart time range"><button type="button" data-minutes="15" aria-pressed="false">15 min</button><button type="button" data-minutes="60" aria-pressed="true">1 hour</button></div></div>
+      <div class="chart-toolbar"><span id="history-caption" role="status">Loading saved history…</span><div class="range-control" role="group" aria-label="Chart time range"><button type="button" data-minutes="15" aria-pressed="false">15 min</button><button type="button" data-minutes="60" aria-pressed="true">1 hour</button><button type="button" data-minutes="1440" aria-pressed="false">24 hours</button><button type="button" data-minutes="10080" aria-pressed="false">7 days</button><button type="button" data-minutes="43200" aria-pressed="false">30 days</button></div></div>
       <div class="two-column">
         <article class="card chart-card">
           <div class="card-heading"><h3><svg class="icon"><use href="#i-cpu"/></svg>CPU activity</h3><strong id="cpu-chart-value">—</strong></div>
@@ -111,7 +111,7 @@
       <p class="service-footnote">Service states come from systemd and refresh every 30 seconds. They don’t measure application response time.</p>
     </section>
 
-    <footer><span><span class="dot"></span> A small Rust process. A live view of your Pi.</span><span>Metrics every 5s <span class="footer-separator">·</span> History stays in memory</span></footer>
+    <footer><span><span class="dot"></span> A small Rust process. A live view of your Pi.</span><span>Metrics every 5s <span class="footer-separator">·</span> <span id="history-storage">Checking saved history…</span></span></footer>
   </main>
 </body>
 </html>

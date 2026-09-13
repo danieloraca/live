@@ -205,13 +205,13 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub fn point_json(&self) -> String {
-        object(&[
-            ("timestamp", self.timestamp.to_string()),
-            ("cpu", number(self.cpu)),
-            ("rx", number(self.rx)),
-            ("tx", number(self.tx)),
-        ])
+    pub fn point(&self) -> crate::history::Point {
+        crate::history::Point {
+            timestamp: self.timestamp,
+            cpu: self.cpu,
+            rx: self.rx,
+            tx: self.tx,
+        }
     }
 
     pub fn json(&self) -> String {

@@ -26,6 +26,11 @@ let minutes = 60;
 let latest = null;
 let refreshing = false;
 let needsHistory = true;
+let historyResolution = 5;
+let historyMinutes = null;
+let historyFailed = false;
+let lastHistoryLoad = 0;
+let rangeChanged = false;
 let connectionFailed = false;
 let lastServiceSignature = "";
 let lastSuccess = 0;
@@ -145,15 +150,21 @@ function render(data) {
   text("live-text", stale ? "delayed" : "live");
   $("live-indicator").classList.toggle("warning", stale);
   health(data, stale);
+  const saved = data.history;
+  text("history-storage", saved?.state === "error" ? "History isn’t being saved" : known(saved?.persisted_through) ? "History saved on disk · kept forever" : "Saving the first history sample…");
+  $("history-storage").classList.toggle("warning", saved?.state === "error");
   const notice = $("notice");
-  notice.hidden = true;
+  const notices = [];
+  if (saved?.state === "error") notices.push("History could not be saved to disk. Live readings still refresh; saving will retry automatically.");
+  if (saved?.dropped_samples > 0) notices.push("Some unsaved samples were lost while storage was unavailable.");
+  if (historyFailed) notices.push("Saved history could not be loaded. Retrying automatically.");
   if (stale) {
-    notice.textContent = "The server is reachable, but its readings are delayed. Showing the last collected sample.";
-    notice.hidden = false;
+    notices.push("The server is reachable, but its readings are delayed. Showing the last collected sample.");
   } else if (m.uptime === null && m.memory === null) {
-    notice.textContent = "This preview is running on " + system.os + ". CPU, memory, uptime, and Pi sensors will appear when this app runs on the Raspberry Pi.";
-    notice.hidden = false;
+    notices.push("This preview is running on " + system.os + ". CPU, memory, uptime, and Pi sensors will appear when this app runs on the Raspberry Pi.");
   }
+  notice.textContent = notices.join(" ");
+  notice.hidden = notices.length === 0;
   renderServices(data.services);
   renderCharts();
 }
@@ -187,7 +198,7 @@ function drawChart(id, keys, ceiling, end) {
     };
     let previousTime = null;
     points.forEach((p) => {
-      if (!known(p[key]) || (previousTime !== null && p.timestamp - previousTime > 15)) flush();
+      if (!known(p[key]) || (previousTime !== null && p.timestamp - previousTime > Math.max(15, historyResolution * 1.5))) flush();
       if (known(p[key])) {
         count++;
         segment.push([(p.timestamp - start) / (minutes * 60) * 500, 100 - Math.min(p[key] / ceiling, 1) * 90]);
@@ -201,16 +212,18 @@ function drawChart(id, keys, ceiling, end) {
 
 function renderCharts() {
   if (!latest) return;
+  const label = minutes < 60 ? minutes + " minutes" : minutes === 60 ? "1 hour" : minutes === 1440 ? "24 hours" : minutes / 1440 + " days";
   const end = latest.metrics.timestamp;
-  const recent = history.filter((p) => p.timestamp >= end - minutes * 60);
+  const recent = history.filter((p) => p.timestamp >= end - minutes * 60 && p.timestamp <= end);
   const maxNetwork = Math.max(1024, ...recent.flatMap((p) => [known(p.rx) ? p.rx : 0, known(p.tx) ? p.tx : 0])) * 1.15;
   $("cpu-empty").hidden = drawChart("cpu-chart", ["cpu"], 100, end) > 0;
   $("network-empty").hidden = drawChart("network-chart", ["rx", "tx"], maxNetwork, end) > 0;
-  text("cpu-empty", latest.metrics.cores ? "Collecting the first CPU reading…" : "CPU history unavailable on this host");
-  text("network-empty", latest.metrics.interfaces.length ? "Collecting the first network reading…" : "Network history unavailable on this host");
-  document.querySelectorAll(".range-label").forEach((e) => { e.textContent = minutes + " minutes ago"; });
-  const duration = history.length > 1 ? Math.max(0, end - history[0].timestamp) : 0;
-  text("history-caption", duration < minutes * 60 - 10 ? "Building history · " + (duration < 60 ? "less than a minute" : Math.floor(duration / 60) + " min collected") : "Recent activity · last " + minutes + " minutes");
+  const loading = historyMinutes !== minutes;
+  text("cpu-empty", loading ? "Loading saved history…" : "No CPU readings in this period");
+  text("network-empty", loading ? "Loading saved history…" : "No network readings in this period");
+  document.querySelectorAll(".range-label").forEach((e) => { e.textContent = label + " ago"; });
+  const detail = historyResolution === 5 ? "5-second samples" : historyResolution / 60 + "-minute averages";
+  text("history-caption", historyFailed ? "Saved history unavailable · retrying" : loading ? "Loading saved history…" : "Last " + label + " · " + detail);
 }
 
 async function request(path) {
@@ -226,20 +239,30 @@ async function refresh() {
   try {
     const data = await request("/api/status");
     if (!data.metrics || !Array.isArray(data.services) || !known(data.metrics.timestamp)) throw new Error("Invalid status");
-    if (needsHistory) {
+    const requestedMinutes = minutes;
+    if (needsHistory || Date.now() - lastHistoryLoad >= 30000) {
       try {
-        const collected = await request("/api/history");
-        if (Array.isArray(collected)) {
-          history = collected.filter((p) => p && known(p.timestamp));
+        const collected = await request("/api/history?minutes=" + requestedMinutes);
+        if (!Array.isArray(collected.points) || !known(collected.resolution_seconds)) throw new Error("Invalid history");
+        if (requestedMinutes === minutes) {
+          history = collected.points.filter((p) => p && known(p.timestamp));
+          historyResolution = collected.resolution_seconds;
+          historyMinutes = requestedMinutes;
+          historyFailed = false;
+          lastHistoryLoad = Date.now();
           needsHistory = false;
         }
-      } catch { /* Current readings still work; retry the history on the next poll. */ }
+      } catch {
+        if (requestedMinutes === minutes) { historyFailed = true; needsHistory = true; }
+      }
     }
     const m = data.metrics;
-    const point = { timestamp: m.timestamp, cpu: m.cpu, rx: m.rx, tx: m.tx };
-    history = history.filter((p) => p.timestamp !== point.timestamp && p.timestamp >= point.timestamp - 3600 && p.timestamp <= point.timestamp);
-    history.push(point);
-    history.sort((a, b) => a.timestamp - b.timestamp);
+    if (historyMinutes === minutes && historyResolution === 5) {
+      const point = { timestamp: m.timestamp, cpu: m.cpu, rx: m.rx, tx: m.tx };
+      history = history.filter((p) => p.timestamp !== point.timestamp && p.timestamp >= point.timestamp - minutes * 60);
+      history.push(point);
+      history.sort((a, b) => a.timestamp - b.timestamp);
+    }
     latest = data;
     connectionFailed = false;
     lastSuccess = Date.now();
@@ -256,17 +279,25 @@ async function refresh() {
   } finally {
     refreshing = false;
     $("refresh").disabled = false;
+    if (rangeChanged) { rangeChanged = false; refresh(); }
   }
 }
 
 document.querySelectorAll("[data-minutes]").forEach((button) => {
   button.addEventListener("click", () => {
+    if (minutes === Number(button.dataset.minutes)) return;
     minutes = Number(button.dataset.minutes);
+    history = [];
+    historyMinutes = null;
+    historyFailed = false;
+    needsHistory = true;
     document.querySelectorAll("[data-minutes]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
     renderCharts();
+    if (refreshing) rangeChanged = true;
+    else refresh();
   });
 });
-$("refresh").addEventListener("click", refresh);
+$("refresh").addEventListener("click", () => { needsHistory = true; refresh(); });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) { needsHistory = true; refresh(); }
 });
