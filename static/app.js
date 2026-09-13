@@ -1,17 +1,7 @@
-"use strict";
+import { HistoryChart, known, percent, bytes, rate, summarize } from "./charts.mjs";
 
 const $ = (id) => document.getElementById(id);
 const text = (id, value) => { $(id).textContent = value; };
-const known = (value) => typeof value === "number" && Number.isFinite(value);
-const percent = (value) => known(value) ? value.toFixed(1) + "%" : "—";
-
-function bytes(value, decimals = 1) {
-  if (!known(value)) return "—";
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let index = 0;
-  while (value >= 1024 && index < units.length - 1) { value /= 1024; index++; }
-  return value.toFixed(index === 0 ? 0 : decimals).replace(/\.0$/, "") + " " + units[index];
-}
 
 function uptime(seconds) {
   if (!known(seconds)) return "—";
@@ -27,6 +17,9 @@ let latest = null;
 let refreshing = false;
 let needsHistory = true;
 let historyResolution = 5;
+let historySummary = null;
+const cpuChart = new HistoryChart("cpu", ["cpu"], "CPU usage");
+const networkChart = new HistoryChart("network", ["rx", "tx"], "network activity");
 let historyMinutes = null;
 let historyFailed = false;
 let lastHistoryLoad = 0;
@@ -123,6 +116,7 @@ function render(data) {
   text("uptime-detail", known(m.uptime) ? "Booted " + new Date((m.timestamp - m.uptime) * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "Available on Linux");
   text("cpu", percent(m.cpu));
   text("cpu-chart-value", percent(m.cpu));
+  text("cpu-context", m.cores ? "Across " + m.cores + " cores" : "Total CPU capacity");
   text("cpu-detail", m.cores ? m.cores + " cores" + (m.cpu === null ? " · first reading pending" : "") : "Available on Linux");
   text("memory", m.memory ? bytes(m.memory.used) : "—");
   text("memory-detail", m.memory ? "of " + bytes(m.memory.total) : "Available on Linux");
@@ -144,7 +138,8 @@ function render(data) {
   text("swap", m.memory ? bytes(m.memory.swap_used, 0) : "—");
   text("swap-detail", m.memory ? (m.memory.swap_total ? "of " + bytes(m.memory.swap_total) : "No swap configured") : "Available on Linux");
   text("processes", known(m.processes) ? m.processes.toLocaleString() : "—");
-  text("network-chart-value", known(m.rx) ? "↓ " + bytes(m.rx) + "/s  ↑ " + bytes(m.tx) + "/s" : "—");
+  text("rx-now", rate(m.rx));
+  text("tx-now", rate(m.tx));
   text("network-interface", m.interfaces.length ? m.interfaces.join(" + ") : "No physical interface");
   text("updated", "Sampled " + new Date(m.timestamp * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
   text("live-text", stale ? "delayed" : "live");
@@ -169,59 +164,21 @@ function render(data) {
   renderCharts();
 }
 
-function drawChart(id, keys, ceiling, end) {
-  const svg = $(id);
-  const start = end - minutes * 60;
-  const points = history.filter((p) => p.timestamp >= start && p.timestamp <= end);
-  svg.replaceChildren();
-  const element = (tag, attrs) => {
-    const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
-    Object.entries(attrs).forEach(([key, value]) => e.setAttribute(key, value));
-    svg.append(e);
-    return e;
-  };
-  [20, 60, 100].forEach((y) => element("line", { x1: 0, y1: y, x2: 500, y2: y, class: "chart-grid" }));
-  let count = 0;
-  keys.forEach((key) => {
-    let segment = [];
-    const flush = () => {
-      if (!segment.length) return;
-      if (segment.length === 1) {
-        const [x, y] = segment[0];
-        element("circle", { cx: x, cy: y, r: 1.8, class: "chart-point " + key });
-      } else {
-        const path = segment.map(([x, y], i) => (i ? "L" : "M") + x.toFixed(2) + "," + y.toFixed(2)).join(" ");
-        if (key === "cpu") element("path", { d: path + " L" + segment.at(-1)[0].toFixed(2) + ",100 L" + segment[0][0].toFixed(2) + ",100 Z", class: "chart-area" });
-        element("path", { d: path, class: "chart-line " + key });
-      }
-      segment = [];
-    };
-    let previousTime = null;
-    points.forEach((p) => {
-      if (!known(p[key]) || (previousTime !== null && p.timestamp - previousTime > Math.max(15, historyResolution * 1.5))) flush();
-      if (known(p[key])) {
-        count++;
-        segment.push([(p.timestamp - start) / (minutes * 60) * 500, 100 - Math.min(p[key] / ceiling, 1) * 90]);
-      }
-      previousTime = p.timestamp;
-    });
-    flush();
-  });
-  return count;
-}
-
 function renderCharts() {
   if (!latest) return;
   const label = minutes < 60 ? minutes + " minutes" : minutes === 60 ? "1 hour" : minutes === 1440 ? "24 hours" : minutes / 1440 + " days";
   const end = latest.metrics.timestamp;
-  const recent = history.filter((p) => p.timestamp >= end - minutes * 60 && p.timestamp <= end);
-  const maxNetwork = Math.max(1024, ...recent.flatMap((p) => [known(p.rx) ? p.rx : 0, known(p.tx) ? p.tx : 0])) * 1.15;
-  $("cpu-empty").hidden = drawChart("cpu-chart", ["cpu"], 100, end) > 0;
-  $("network-empty").hidden = drawChart("network-chart", ["rx", "tx"], maxNetwork, end) > 0;
+  const start = end - minutes * 60;
+  const recent = history.filter((p) => p.timestamp >= start && p.timestamp <= end);
   const loading = historyMinutes !== minutes;
-  text("cpu-empty", loading ? "Loading saved history…" : "No CPU readings in this period");
-  text("network-empty", loading ? "Loading saved history…" : "No network readings in this period");
-  document.querySelectorAll(".range-label").forEach((e) => { e.textContent = label + " ago"; });
+  cpuChart.render(recent, start, end, historyResolution, loading);
+  networkChart.render(recent, start, end, historyResolution, loading);
+  for (const key of ["cpu", "rx", "tx"]) {
+    const summary = loading ? null : historyResolution === 5 ? summarize(recent, key) : historySummary?.[key];
+    const format = key === "cpu" ? percent : rate;
+    text(key + "-average", format(summary?.average));
+    text(key + "-peak", format(summary?.peak));
+  }
   const detail = historyResolution === 5 ? "5-second samples" : historyResolution / 60 + "-minute averages";
   text("history-caption", historyFailed ? "Saved history unavailable · retrying" : loading ? "Loading saved history…" : "Last " + label + " · " + detail);
 }
@@ -247,6 +204,7 @@ async function refresh() {
         if (requestedMinutes === minutes) {
           history = collected.points.filter((p) => p && known(p.timestamp));
           historyResolution = collected.resolution_seconds;
+          historySummary = collected.summary ?? null;
           historyMinutes = requestedMinutes;
           historyFailed = false;
           lastHistoryLoad = Date.now();
@@ -289,6 +247,9 @@ document.querySelectorAll("[data-minutes]").forEach((button) => {
     minutes = Number(button.dataset.minutes);
     history = [];
     historyMinutes = null;
+    historySummary = null;
+    cpuChart.reset();
+    networkChart.reset();
     historyFailed = false;
     needsHistory = true;
     document.querySelectorAll("[data-minutes]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));

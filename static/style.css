@@ -22,7 +22,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 button { font: inherit; }
 button, a { touch-action: manipulation; }
 a { color: inherit; }
-a:focus-visible, button:focus-visible { outline: 3px solid var(--blue); outline-offset: 5px; border-radius: 5px; }
+a:focus-visible, button:focus-visible, .chart-plot:focus-visible { outline: 3px solid var(--blue); outline-offset: 5px; border-radius: 5px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 [hidden] { display: none !important; }
 .icon-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 .icon { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -66,22 +67,42 @@ h3 .icon { color: var(--soft); width: 15px; height: 15px; }
 .chart-card { padding: 20px 21px 15px; }
 .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .card-heading strong { font-size: 14px; font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.chart-body { height: 89px; margin: 18px 0 9px; position: relative; }
+.chart-context { color: var(--soft); font-size: 10px; text-align: right; overflow-wrap: anywhere; }
+.chart-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 21px 0 23px; min-height: 63px; font-variant-numeric: tabular-nums; }
+.chart-stats > div + div { border-left: 1px solid var(--track); padding-left: 17px; }
+.chart-stats dt { font-size: 10px; color: var(--soft); margin-bottom: 9px; }
+.chart-stats dd { margin: 0; font-size: 25px; font-weight: 600; letter-spacing: -.03em; }
+.network-stats dd { display: flex; flex-direction: column; gap: 7px; font-size: 12px; letter-spacing: 0; font-weight: 500; white-space: nowrap; }
+.download { color: var(--blue); }
+.upload { color: var(--green); }
+.chart-layout { display: grid; grid-template-columns: 65px minmax(0, 1fr); column-gap: 10px; }
+.chart-y-axis { display: flex; flex-direction: column; justify-content: space-between; height: 160px; color: var(--soft); font-size: 10px; line-height: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.chart-plot { height: 160px; position: relative; cursor: crosshair; touch-action: pan-y; }
 .chart { width: 100%; height: 100%; overflow: visible; }
 .chart-grid { stroke: var(--track); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-line { fill: none; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .chart-line.cpu, .chart-line.rx { stroke: var(--blue); }
-.chart-line.tx { stroke: var(--green); }
+.chart-line.tx { stroke: var(--green); stroke-dasharray: 5 3; }
 .chart-point.cpu, .chart-point.rx { fill: var(--blue); }
 .chart-point.tx { fill: var(--green); }
 .chart-area { fill: #80adff14; }
-.chart-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--soft); }
-.chart-axis { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--soft); font-size: 10px; }
-.legend { display: flex; gap: 14px; }
+.chart-missing { fill: #93a6b90a; stroke: var(--border); stroke-dasharray: 3 4; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart-missing-labels, .chart-cursor { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.chart-missing-note { position: absolute; top: 50%; text-align: center; transform: translateY(-50%); color: var(--soft); font-size: 10px; line-height: 1.5; padding: 0 3px; }
+.chart-crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.chart-time-axis { grid-column: 2; display: flex; justify-content: space-between; color: var(--soft); font-size: 10px; margin-top: 9px; font-variant-numeric: tabular-nums; gap: 6px; }
+.chart-time-axis time { display: flex; flex-direction: column; gap: 4px; }
+.chart-time-axis time:nth-child(2) { text-align: center; }
+.chart-time-axis time:last-child { text-align: right; }
+.chart-readout { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-height: 47px; margin-top: 13px; padding-top: 10px; border-top: 1px solid var(--track); font-size: 10px; color: var(--soft); font-variant-numeric: tabular-nums; line-height: 1.5; }
+.chart-readout strong { color: var(--muted); font-size: 11px; font-weight: 500; }
+.chart-summary-note { margin: 10px 1px 0; color: var(--soft); font-size: 10px; line-height: 1.6; }
+.legend { display: flex; gap: 14px; color: var(--soft); font-size: 10px; margin-top: 8px; }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .legend-line { display: inline-block; width: 10px; height: 3px; border-radius: 3px; }
 .blue { background: var(--blue); }
 .green { background: var(--green); }
+.legend-line.dashed { background: repeating-linear-gradient(to right, var(--green) 0 4px, transparent 4px 6px); }
 .storage-grid { margin-top: 13px; }
 .storage-card { padding: 21px; }
 .path-label { color: var(--soft); font-size: 12px; }
@@ -163,7 +184,11 @@ footer .dot { width: 5px; height: 5px; color: var(--soft); }
   .chart-card { padding: 18px 18px 14px; }
   .chart-toolbar { flex-direction: column; align-items: stretch; gap: 10px; }
   .range-control button { flex: 1; padding: 7px 5px; }
-  .chart-body { height: 94px; }
+  .chart-layout { grid-template-columns: 59px minmax(0, 1fr); column-gap: 8px; }
+  .chart-stats { gap: 9px; }
+  .chart-stats > div + div { padding-left: 10px; }
+  .chart-stats dd { font-size: clamp(18px, 5.9vw, 23px); }
+  .network-stats dd { font-size: clamp(9px, 2.8vw, 11px); }
   .storage-grid { margin-top: 10px; }
   .storage-card { padding: 18px; }
   .detail-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px; }

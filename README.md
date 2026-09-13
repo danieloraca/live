@@ -73,6 +73,14 @@ averaged views cannot show gaps shorter than their bucket size. Hidden tabs
 pause polling and reload saved history when reopened. Longer views reload every
 30 seconds while current readings still refresh every five seconds.
 
+Both charts show labeled scales, local timestamps, and Now/Average/Peak summaries.
+CPU stays on a fixed 0–100% scale; the network scale adapts to traffic and labels
+its units. Period summaries use the original samples, excluding missing readings,
+so peaks remain accurate even when the plotted line is averaged. Hover or tap to
+inspect a reading, or focus the chart and use arrow keys, Home, and End. Escape
+clears the selection. Averaged readings identify their time bucket. Unrecorded
+periods are marked as missing rather than drawn as zero.
+
 Disk use grows as history accumulates. For a consistent backup, stop the service,
 copy the database and any remaining `-wal`/`-shm` sidecars together, then restart
 it, or use SQLite's online backup API. Do not copy just the main database file
@@ -82,7 +90,8 @@ Read-only endpoints:
 
 - GET /api/status: current metrics, machine details, services, and history save
   status (`state`, `persisted_through`, `pending_samples`, `dropped_samples`).
-- GET /api/history?minutes=60: an object with `points` and `resolution_seconds`.
+- GET /api/history?minutes=60: an object with `points`, `resolution_seconds`, and
+  `summary` (per-metric `average`, `peak`, and valid `samples` count).
   Supported minute values: `15`, `60` (default), `1440`, `10080`, `43200`.
   Each point contains `timestamp`, `cpu`, `rx`, and `tx`. CPU is a percentage;
   network rates are bytes/second. Unsupported ranges return HTTP 400.
@@ -114,6 +123,7 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings
 node --check static/app.js
+node --test tests/charts.test.mjs
 python3 tests/history_restart.py
 ~~~
 

@@ -74,6 +74,40 @@ pub struct Store {
     dropped_samples: u64,
 }
 
+#[derive(Default, Debug, PartialEq)]
+struct Summary {
+    sum: f64,
+    count: u64,
+    peak: Option<f64>,
+}
+
+impl Summary {
+    fn record(&mut self, value: Option<f64>) {
+        if let Some(value) = value {
+            self.sum += value;
+            self.count += 1;
+            self.peak = Some(self.peak.map_or(value, |p| p.max(value)));
+        }
+    }
+
+    fn json(&self) -> String {
+        object(&[
+            (
+                "average",
+                number((self.count > 0).then(|| self.sum / self.count as f64)),
+            ),
+            ("peak", number(self.peak)),
+            ("samples", self.count.to_string()),
+        ])
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct History {
+    points: Vec<Point>,
+    summary: [Summary; 3],
+}
+
 struct Bucket {
     timestamp: u64,
     sums: [f64; 3],
@@ -230,7 +264,7 @@ impl Store {
         ])
     }
 
-    pub fn query(&self, range: Range, end: u64) -> rusqlite::Result<Vec<Point>> {
+    fn query(&self, range: Range, end: u64) -> rusqlite::Result<History> {
         let start = end.saturating_sub(range.minutes * 60);
         let resolution = if range.resolution == 5 {
             1
@@ -260,6 +294,13 @@ impl Store {
             })
         })?;
         let mut buckets = Vec::new();
+        let mut summary: [Summary; 3] = Default::default();
+        let mut record = |point: Point| {
+            for (stat, value) in summary.iter_mut().zip([point.cpu, point.rx, point.tx]) {
+                stat.record(value);
+            }
+            Bucket::push(&mut buckets, point, resolution);
+        };
         for row in rows {
             let point = row?;
             let mut replaced = false;
@@ -269,29 +310,45 @@ impl Store {
             {
                 let newer = pending.next().unwrap();
                 replaced = newer.timestamp == point.timestamp;
-                Bucket::push(&mut buckets, newer, resolution);
+                record(newer);
             }
             if !replaced {
-                Bucket::push(&mut buckets, point, resolution);
+                record(point);
             }
         }
         for point in pending {
-            Bucket::push(&mut buckets, point, resolution);
+            record(point);
         }
-        Ok(buckets.into_iter().map(Bucket::point).collect())
+        Ok(History {
+            points: buckets.into_iter().map(Bucket::point).collect(),
+            summary,
+        })
     }
 
     pub fn query_json(&self, range: Range, end: u64) -> rusqlite::Result<String> {
-        let points = self.query(range, end)?;
+        let history = self.query(range, end)?;
         Ok(object(&[
             (
                 "points",
                 format!(
                     "[{}]",
-                    points.iter().map(Point::json).collect::<Vec<_>>().join(",")
+                    history
+                        .points
+                        .iter()
+                        .map(Point::json)
+                        .collect::<Vec<_>>()
+                        .join(",")
                 ),
             ),
             ("resolution_seconds", range.resolution.to_string()),
+            (
+                "summary",
+                object(&[
+                    ("cpu", history.summary[0].json()),
+                    ("rx", history.summary[1].json()),
+                    ("tx", history.summary[2].json()),
+                ]),
+            ),
         ]))
     }
 }
@@ -323,13 +380,14 @@ mod tests {
         }
         let store = Store::open(&path).unwrap();
         assert_eq!(
-            store.query(Range::parse("").unwrap(), 100).unwrap(),
+            store.query(Range::parse("").unwrap(), 100).unwrap().points,
             vec![old]
         );
         assert_eq!(
             store
                 .query(Range::parse("").unwrap(), recent.timestamp)
-                .unwrap(),
+                .unwrap()
+                .points,
             vec![recent]
         );
         let integrity: String = store
@@ -349,7 +407,9 @@ mod tests {
         store.record(point(130, None));
         let range = Range::parse("minutes=1440").unwrap();
         let before = store.query(range, 130).unwrap();
-        assert_eq!(before, vec![point(130, Some(40.0))]);
+        assert_eq!(before.points, vec![point(130, Some(40.0))]);
+        assert_eq!(before.summary[0].peak, Some(50.0));
+        assert_eq!(before.summary[0].count, 2);
         let saved: i64 = store
             .connection
             .query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0))
@@ -380,7 +440,11 @@ mod tests {
             .unwrap();
         store.flush().unwrap();
         assert_eq!(
-            store.query(Range::parse("").unwrap(), 110).unwrap().len(),
+            store
+                .query(Range::parse("").unwrap(), 110)
+                .unwrap()
+                .points
+                .len(),
             3
         );
     }
@@ -397,15 +461,15 @@ mod tests {
         }
         store.flush().unwrap();
         let hour = store.query(Range::parse("").unwrap(), 9000).unwrap();
-        assert_eq!(hour.len(), 721);
-        assert_eq!(hour[0].timestamp, 5400);
+        assert_eq!(hour.points.len(), 721);
+        assert_eq!(hour.points[0].timestamp, 5400);
         store.record(point(10000, None));
         let day = store
             .query(Range::parse("minutes=1440").unwrap(), 10000)
             .unwrap();
-        assert!(day.len() <= 1441);
-        assert_eq!(day.last().unwrap().cpu, None);
-        assert_eq!(day[day.len() - 2].timestamp, 9000);
+        assert!(day.points.len() <= 1441);
+        assert_eq!(day.points.last().unwrap().cpu, None);
+        assert_eq!(day.points[day.points.len() - 2].timestamp, 9000);
         assert!(Range::parse("minutes=99999999").is_none());
         assert!(Range::parse("minutes=60&minutes=15").is_none());
     }
@@ -425,8 +489,8 @@ mod tests {
         let month = store
             .query(Range::parse("minutes=43200").unwrap(), 2_592_000)
             .unwrap();
-        assert_eq!(month.len(), 1441);
-        assert_eq!(month[0], point(1795, Some(47.5)));
+        assert_eq!(month.points.len(), 1441);
+        assert_eq!(month.points[0], point(1795, Some(47.5)));
         let rows: i64 = store
             .connection
             .query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0))
@@ -462,5 +526,25 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 721);
+    }
+
+    #[test]
+    fn period_summary_uses_raw_samples_not_averages_of_unequal_buckets() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("history.sqlite3")).unwrap();
+        store.record(point(5, Some(100.0)));
+        store.record(point(60, Some(0.0)));
+        store.record(point(65, Some(0.0)));
+        store.record(point(70, Some(0.0)));
+        store.record(point(75, None));
+        let result = store
+            .query(Range::parse("minutes=1440").unwrap(), 75)
+            .unwrap();
+        assert_eq!(result.points.len(), 2);
+        assert_eq!(result.summary[0].count, 4);
+        assert_eq!(result.summary[0].sum / result.summary[0].count as f64, 25.0);
+        assert_eq!(result.summary[0].peak, Some(100.0));
+        assert_eq!(result.summary[2].count, 0);
+        assert_eq!(result.summary[2].peak, None);
     }
 }

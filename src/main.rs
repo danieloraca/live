@@ -134,6 +134,11 @@ fn route(
             "text/javascript; charset=utf-8",
             include_str!("../static/app.js").into(),
         ),
+        "/charts.mjs" => (
+            200,
+            "text/javascript; charset=utf-8",
+            include_str!("../static/charts.mjs").into(),
+        ),
         "/api/status" => {
             let state = state.read().unwrap();
             if state.status.is_empty() {
@@ -240,10 +245,12 @@ mod tests {
         assert_eq!(route("/api/status", &state, &history).0, 503);
         assert_eq!(route("/missing.js", &state, &history).0, 404);
         assert_eq!(route("/api/history?minutes=0", &state, &history).0, 400);
-        assert_eq!(
-            route("/api/history", &state, &history).2,
-            "{\"points\":[],\"resolution_seconds\":5}"
+        assert!(
+            route("/api/history", &state, &history)
+                .2
+                .starts_with("{\"points\":[],\"resolution_seconds\":5,")
         );
-        assert!(route("/", &state, &history).2.contains("Raspberry Pi"));
+        assert_eq!(route("/charts.mjs", &state, &history).0, 200);
+        assert!(route("/", &state, &history).2.contains("My Pi"));
     }
 }

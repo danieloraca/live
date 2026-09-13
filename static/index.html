@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>Pi Status</title>
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js" type="module"></script>
 </head>
 <body>
   <svg class="icon-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
@@ -69,16 +69,26 @@
       <div class="chart-toolbar"><span id="history-caption" role="status">Loading saved history…</span><div class="range-control" role="group" aria-label="Chart time range"><button type="button" data-minutes="15" aria-pressed="false">15 min</button><button type="button" data-minutes="60" aria-pressed="true">1 hour</button><button type="button" data-minutes="1440" aria-pressed="false">24 hours</button><button type="button" data-minutes="10080" aria-pressed="false">7 days</button><button type="button" data-minutes="43200" aria-pressed="false">30 days</button></div></div>
       <div class="two-column">
         <article class="card chart-card">
-          <div class="card-heading"><h3><svg class="icon"><use href="#i-cpu"/></svg>CPU activity</h3><strong id="cpu-chart-value">—</strong></div>
-          <div class="chart-body"><svg class="chart" id="cpu-chart" viewBox="0 0 500 100" preserveAspectRatio="none" role="img" aria-label="CPU usage history"></svg><span class="chart-empty" id="cpu-empty">Collecting history…</span></div>
-          <div class="chart-axis"><span class="range-label">60 minutes ago</span><span>now</span></div>
+          <div class="card-heading"><h3><svg class="icon"><use href="#i-cpu"/></svg>CPU usage</h3><span class="chart-context" id="cpu-context">Total CPU capacity</span></div>
+          <dl class="chart-stats" aria-label="CPU usage summary">
+            <div><dt>Now</dt><dd id="cpu-chart-value">—</dd></div>
+            <div><dt>Average</dt><dd id="cpu-average">—</dd></div>
+            <div><dt>Peak</dt><dd id="cpu-peak">—</dd></div>
+          </dl>
+          <div id="cpu-view"></div>
         </article>
         <article class="card chart-card">
-          <div class="card-heading"><h3><svg class="icon"><use href="#i-network"/></svg>Network activity</h3><strong id="network-chart-value">—</strong></div>
-          <div class="chart-body"><svg class="chart" id="network-chart" viewBox="0 0 500 100" preserveAspectRatio="none" role="img" aria-label="Network download and upload history"></svg><span class="chart-empty" id="network-empty">Collecting history…</span></div>
-          <div class="chart-axis"><div class="legend"><span><i class="legend-line blue"></i>download</span><span><i class="legend-line green"></i>upload</span></div><span id="network-interface">Physical interfaces</span></div>
+          <div class="card-heading"><h3><svg class="icon"><use href="#i-network"/></svg>Network activity</h3><span class="chart-context" id="network-interface">Physical interfaces</span></div>
+          <dl class="chart-stats network-stats" aria-label="Network activity summary">
+            <div><dt>Now</dt><dd><span class="download"><span class="sr-only">Download </span>↓ <span id="rx-now">—</span></span><span class="upload"><span class="sr-only">Upload </span>↑ <span id="tx-now">—</span></span></dd></div>
+            <div><dt>Average</dt><dd><span class="download"><span class="sr-only">Download </span>↓ <span id="rx-average">—</span></span><span class="upload"><span class="sr-only">Upload </span>↑ <span id="tx-average">—</span></span></dd></div>
+            <div><dt>Peak</dt><dd><span class="download"><span class="sr-only">Download </span>↓ <span id="rx-peak">—</span></span><span class="upload"><span class="sr-only">Upload </span>↑ <span id="tx-peak">—</span></span></dd></div>
+          </dl>
+          <div id="network-view"></div>
+          <div class="legend"><span><i class="legend-line blue"></i>download</span><span><i class="legend-line green dashed"></i>upload</span></div>
         </article>
       </div>
+      <p class="chart-summary-note">Average and peak use recorded samples in the selected period. Times are local to your browser.</p>
 
       <div class="two-column storage-grid">
         <article class="card storage-card">

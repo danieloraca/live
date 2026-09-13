@@ -102,6 +102,8 @@ with tempfile.TemporaryDirectory(prefix="live-history-test-") as directory:
                 assert day["resolution_seconds"] == 60
                 bucket = next(p for p in day["points"] if p["timestamp"] == day_start + 5)
                 assert bucket == {"timestamp": day_start + 5, "cpu": 30, "rx": 200, "tx": None}
+                assert day["summary"]["cpu"]["peak"] >= 40
+                assert day["summary"]["cpu"]["samples"] >= 2
                 assert get("/api/status")["history"]["state"] == "ok"
                 for minutes, resolution in [(15, 5), (60, 5), (10080, 600), (43200, 1800)]:
                     result = get(f"/api/history?minutes={minutes}")
