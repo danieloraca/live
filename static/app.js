@@ -177,7 +177,7 @@ function drawChart(id, keys, ceiling, end) {
       if (!segment.length) return;
       if (segment.length === 1) {
         const [x, y] = segment[0];
-        element("circle", { cx: x, cy: y, r: 1.8, fill: key === "tx" ? "#229953" : "#2864e8" });
+        element("circle", { cx: x, cy: y, r: 1.8, class: "chart-point " + key });
       } else {
         const path = segment.map(([x, y], i) => (i ? "L" : "M") + x.toFixed(2) + "," + y.toFixed(2)).join(" ");
         if (key === "cpu") element("path", { d: path + " L" + segment.at(-1)[0].toFixed(2) + ",100 L" + segment[0][0].toFixed(2) + ",100 Z", class: "chart-area" });
