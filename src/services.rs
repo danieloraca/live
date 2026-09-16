@@ -7,6 +7,7 @@ const SERVICES: &[(&str, &str, u16)] = &[
     ("id-generator.service", "ID Generator", 3012),
     ("tetris.service", "Tetris", 3020),
     ("solitaire.service", "Solitaire", 3021),
+    ("dario.service", "Dario", 3041),
     ("trader-dashboard.service", "Trader Dashboard", 3040),
     ("sym_notes.service", "Sym Notes", 3444),
     ("jirpi.service", "JiraPi", 5644),
