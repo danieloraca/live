@@ -11,7 +11,7 @@ The dashboard includes:
 - Root filesystem usage, load averages, CPU clock, swap, and process count.
 - Download/upload rates and interface transfer totals.
 - Raspberry Pi throttling and undervoltage warnings when vcgencmd is available.
-- All eight existing app links, with their systemd states and TCP ports.
+- Configured app links, including Elite on port 3141, with their systemd states and TCP ports.
 
 ## Run
 

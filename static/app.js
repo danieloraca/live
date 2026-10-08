@@ -57,8 +57,19 @@ function renderServices(services) {
   const signature = JSON.stringify(services);
   if (signature === lastServiceSignature) return;
   lastServiceSignature = signature;
-  const initials = ["IP", "ID", "TE", "SO", "TR", "SN", "JP", "PI"];
-  const rows = services.map((service, index) => {
+  const initials = {
+    "iploc.service": "IP",
+    "id-generator.service": "ID",
+    "tetris.service": "TE",
+    "solitaire.service": "SO",
+    "dario.service": "DA",
+    "trader-dashboard.service": "TR",
+    "elite.service": "EL",
+    "sym_notes.service": "SN",
+    "jirpi.service": "JP",
+    "live.service": "PI",
+  };
+  const rows = services.map((service) => {
     const link = document.createElement("a");
     link.className = "service-row";
     const url = new URL("/", window.location.href);
@@ -71,7 +82,7 @@ function renderServices(services) {
     label.className = "service-label";
     const icon = document.createElement("span");
     icon.className = "app-icon";
-    icon.textContent = initials[index] || "AP";
+    icon.textContent = initials[service.unit] || "AP";
     icon.setAttribute("aria-hidden", "true");
     const name = document.createElement("span");
     const strong = document.createElement("strong");
