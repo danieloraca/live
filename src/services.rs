@@ -9,6 +9,7 @@ const SERVICES: &[(&str, &str, u16)] = &[
     ("solitaire.service", "Solitaire", 3021),
     ("dario.service", "Dario", 3041),
     ("trader-dashboard.service", "Trader Dashboard", 3040),
+    ("elite.service", "Elite", 3141),
     ("sym_notes.service", "Sym Notes", 3444),
     ("jirpi.service", "JiraPi", 5644),
     ("live.service", "Live Status", 9999),
