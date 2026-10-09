@@ -88,17 +88,29 @@
           <div class="legend"><span><i class="legend-line blue"></i>download</span><span><i class="legend-line green dashed"></i>upload</span></div>
         </article>
       </div>
-      <article class="card chart-card thermal-card">
-        <div class="card-heading"><h3><svg class="icon"><use href="#i-temp"/></svg>Temperature &amp; CPU clock</h3><span class="chart-context">SoC temperature · ARM clock</span></div>
-        <dl class="chart-stats thermal-stats" aria-label="Temperature and CPU clock summary">
-          <div><dt>Now</dt><dd id="thermal-now">—</dd></div>
-          <div><dt>Temperature peak</dt><dd id="thermal-peak">—</dd></div>
-          <div><dt>Hardware alerts</dt><dd id="thermal-alerts">—</dd></div>
-        </dl>
-        <div id="thermal-view"></div>
-        <div class="legend"><span><i class="legend-line amber"></i>temperature · upper track</span><span><i class="legend-line blue"></i>CPU clock · lower track</span><span><i class="legend-line red"></i>active throttle / power flag</span></div>
-      </article>
-      <p class="chart-summary-note">Average and peak use recorded samples in the selected period. Times are local to your browser.</p>
+      <div class="two-column thermal-grid">
+        <article class="card chart-card">
+          <div class="card-heading"><h3><svg class="icon"><use href="#i-temp"/></svg>Temperature</h3><span class="chart-context">SoC sensor</span></div>
+          <dl class="chart-stats" aria-label="Temperature summary">
+            <div><dt>Now</dt><dd id="temperature-now">—</dd></div>
+            <div><dt>Average</dt><dd id="temperature-average">—</dd></div>
+            <div><dt>Peak</dt><dd id="temperature-peak">—</dd></div>
+          </dl>
+          <div id="temperature-view"></div>
+          <div class="legend"><span><i class="legend-line amber"></i>temperature</span><span><i class="legend-line red"></i>active throttle / power flag</span></div>
+        </article>
+        <article class="card chart-card clock-chart-card">
+          <div class="card-heading"><h3><svg class="icon"><use href="#i-clock"/></svg>CPU clock</h3><span class="chart-context">ARM frequency</span></div>
+          <dl class="chart-stats" aria-label="CPU clock summary">
+            <div><dt>Now</dt><dd id="frequency-now">—</dd></div>
+            <div><dt>Average</dt><dd id="frequency-average">—</dd></div>
+            <div><dt>Peak</dt><dd id="frequency-peak">—</dd></div>
+          </dl>
+          <div id="frequency-view"></div>
+          <div class="legend"><span><i class="legend-line blue"></i>CPU clock</span><span><i class="legend-line red"></i>active throttle / power flag</span></div>
+        </article>
+      </div>
+      <p class="chart-summary-note">Average and peak use recorded samples in the selected period. Hardware alerts: <span id="thermal-alerts">—</span>. Times are local to your browser.</p>
 
       <div class="two-column storage-grid">
         <article class="card storage-card">

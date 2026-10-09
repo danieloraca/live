@@ -2,6 +2,7 @@ import { HistoryChart, known, percent, bytes, rate, frequency, summarize } from 
 
 const $ = (id) => document.getElementById(id);
 const text = (id, value) => { $(id).textContent = value; };
+const temperature = (value) => known(value) ? value.toFixed(1) + "°C" : "—";
 
 function uptime(seconds) {
   if (!known(seconds)) return "—";
@@ -20,7 +21,8 @@ let historyResolution = 5;
 let historySummary = null;
 const cpuChart = new HistoryChart("cpu", ["cpu"], "CPU usage");
 const networkChart = new HistoryChart("network", ["rx", "tx"], "network activity");
-const thermalChart = new HistoryChart("thermal", ["temperature", "frequency"], "temperature and CPU clock");
+const temperatureChart = new HistoryChart("temperature", ["temperature"], "temperature");
+const frequencyChart = new HistoryChart("frequency", ["frequency"], "CPU clock");
 let historyMinutes = null;
 let historyFailed = false;
 let lastHistoryLoad = 0;
@@ -141,7 +143,7 @@ function render(data) {
   text("cpu-detail", m.cores ? m.cores + " cores" + (m.cpu === null ? " · first reading pending" : "") : "Available on Linux");
   text("memory", m.memory ? bytes(m.memory.used) : "—");
   text("memory-detail", m.memory ? "of " + bytes(m.memory.total) : "Available on Linux");
-  text("temperature", known(m.temperature) ? m.temperature.toFixed(1) + "°C" : "—");
+  text("temperature", temperature(m.temperature));
   let temperatureDetail = "Sensor unavailable";
   if (known(m.temperature)) {
     if (known(m.throttled)) {
@@ -155,7 +157,8 @@ function render(data) {
   storage("disk", m.disk);
   text("load", m.load ? m.load.map((n) => n.toFixed(2)).join(" / ") : "—");
   text("frequency", frequency(m.frequency));
-  text("thermal-now", known(m.temperature) ? m.temperature.toFixed(1) + "°C · " + frequency(m.frequency) : "—");
+  text("temperature-now", temperature(m.temperature));
+  text("frequency-now", frequency(m.frequency));
   text("transferred", known(m.received) ? "↓ " + bytes(m.received, 0) + "  ↑ " + bytes(m.sent, 0) : "—");
   text("swap", m.memory ? bytes(m.memory.swap_used, 0) : "—");
   text("swap-detail", m.memory ? (m.memory.swap_total ? "of " + bytes(m.memory.swap_total) : "No swap configured") : "Available on Linux");
@@ -195,15 +198,14 @@ function renderCharts() {
   const loading = historyMinutes !== minutes;
   cpuChart.render(recent, start, end, historyResolution, loading);
   networkChart.render(recent, start, end, historyResolution, loading);
-  thermalChart.render(recent, start, end, historyResolution, loading);
-  for (const key of ["cpu", "rx", "tx"]) {
+  temperatureChart.render(recent, start, end, historyResolution, loading);
+  frequencyChart.render(recent, start, end, historyResolution, loading);
+  for (const key of ["cpu", "rx", "tx", "temperature", "frequency"]) {
     const summary = loading ? null : historyResolution === 5 ? summarize(recent, key) : historySummary?.[key];
-    const format = key === "cpu" ? percent : rate;
+    const format = key === "cpu" ? percent : key === "temperature" ? temperature : key === "frequency" ? frequency : rate;
     text(key + "-average", format(summary?.average));
     text(key + "-peak", format(summary?.peak));
   }
-  const temperatureSummary = loading ? null : historyResolution === 5 ? summarize(recent, "temperature") : historySummary?.temperature;
-  text("thermal-peak", known(temperatureSummary?.peak) ? temperatureSummary.peak.toFixed(1) + "°C" : "—");
   const flagged = recent.filter((p) => known(p.throttled));
   text("thermal-alerts", loading ? "—" : !flagged.length ? "No data yet" : flagged.some((p) => p.throttled & 15) ? "Observed" : "None recorded");
   const detail = historyResolution === 5 ? "5-second samples" : historyResolution / 60 + "-minute averages";
@@ -278,7 +280,8 @@ document.querySelectorAll("[data-minutes]").forEach((button) => {
     historySummary = null;
     cpuChart.reset();
     networkChart.reset();
-    thermalChart.reset();
+    temperatureChart.reset();
+    frequencyChart.reset();
     historyFailed = false;
     needsHistory = true;
     document.querySelectorAll("[data-minutes]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));

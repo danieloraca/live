@@ -109,8 +109,8 @@ the tab is visible. Current readings still refresh every five seconds.
 
 The charts show labeled scales, local timestamps, and period summaries.
 CPU stays on a fixed 0–100% scale; the network scale adapts to traffic and labels
-its units. The thermal chart uses aligned temperature and ARM clock tracks with
-separate axes; red markers show samples with active throttle, temperature, or
+its units. Temperature and ARM clock have separate charts with the same selected
+time range; red markers show samples with active throttle, temperature, or
 undervoltage flags. The firmware's latched "occurred since boot" bits are retained
 but do not create event markers with an invented timestamp. Period summaries use original
 samples, excluding missing readings, so peaks remain accurate even when the
