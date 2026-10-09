@@ -118,11 +118,12 @@ Transfers count bytes since each interface started; a reset starts a new rate
 baseline. Root disk availability excludes reserved space.
 
 Service state reflects systemd. For each active service, the dashboard also
-requests `/` over HTTP on `127.0.0.1` with a bounded timeout. A 2xx–4xx
-response updates its last reply; 5xx responses and timeouts warn. The 404 at
-IP Location's API-only root is therefore visible without marking the service
-unreachable. Last-reply times reset when this dashboard restarts. Ports are
-detected from the main process's TCP listeners when
+requests its configured health path over HTTP on the address bound by its local
+listener, with a bounded timeout. JiraPi uses `/healthz`; other apps use `/`.
+A 2xx–4xx response updates its last reply; 5xx responses and timeouts warn.
+The 404 at IP Location's API-only root is therefore visible without marking
+the service unreachable. Last-reply times reset when this dashboard restarts.
+Ports are detected from the main process's TCP listeners when
 permissions allow. Configured ports remain fallbacks for wrapper/container
 services. Configure entries in src/services.rs. System commands are bounded to
 two seconds; unavailable metrics remain null. Request workers are bounded, and

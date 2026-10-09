@@ -1,22 +1,22 @@
 use crate::util::{command, now, number, object, quote};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
 // Ports are fallbacks when systemd's main process is a wrapper (for example Docker).
-const SERVICES: &[(&str, &str, u16)] = &[
-    ("iploc.service", "IP Location", 3000),
-    ("id-generator.service", "ID Generator", 3012),
-    ("tetris.service", "Tetris", 3020),
-    ("solitaire.service", "Solitaire", 3021),
-    ("dario.service", "Dario", 3041),
-    ("trader-dashboard.service", "Trader Dashboard", 3040),
-    ("elite.service", "Elite", 3141),
-    ("sym_notes.service", "Sym Notes", 3444),
-    ("jirpi.service", "JiraPi", 5644),
-    ("live.service", "Live Status", 9999),
+const SERVICES: &[(&str, &str, u16, &str)] = &[
+    ("iploc.service", "IP Location", 3000, "/"),
+    ("id-generator.service", "ID Generator", 3012, "/"),
+    ("tetris.service", "Tetris", 3020, "/"),
+    ("solitaire.service", "Solitaire", 3021, "/"),
+    ("dario.service", "Dario", 3041, "/"),
+    ("trader-dashboard.service", "Trader Dashboard", 3040, "/"),
+    ("elite.service", "Elite", 3141, "/"),
+    ("sym_notes.service", "Sym Notes", 3444, "/"),
+    ("jirpi.service", "JiraPi", 5644, "/healthz"),
+    ("live.service", "Live Status", 9999, "/"),
 ];
 
 fn properties(output: &str) -> BTreeMap<String, BTreeMap<String, String>> {
@@ -52,6 +52,28 @@ fn ports(output: &str, pid: u32) -> BTreeSet<u16> {
         .collect()
 }
 
+fn probe_address(sockets: &str, port: u16) -> SocketAddr {
+    for line in sockets.lines() {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        let address_index = if fields.first() == Some(&"tcp") { 4 } else { 3 };
+        let Some((host, listener_port)) =
+            fields.get(address_index).and_then(|s| s.rsplit_once(':'))
+        else {
+            continue;
+        };
+        if listener_port.parse::<u16>() != Ok(port) {
+            continue;
+        }
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        if let Ok(ip) = host.parse::<IpAddr>()
+            && !ip.is_unspecified()
+        {
+            return SocketAddr::new(ip, port);
+        }
+    }
+    SocketAddr::from(([127, 0, 0, 1], port))
+}
+
 #[derive(Default)]
 pub struct Collector {
     last_response: BTreeMap<&'static str, u64>,
@@ -63,14 +85,13 @@ struct Probe {
     latency_ms: Option<f64>,
 }
 
-fn probe(port: u16) -> Probe {
+fn probe(address: SocketAddr, path: &str) -> Probe {
     let timeout = Duration::from_secs(2);
     let start = Instant::now();
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&address, timeout) else {
         return Probe::default();
     };
-    let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
     if stream.set_read_timeout(Some(timeout)).is_err()
         || stream.set_write_timeout(Some(timeout)).is_err()
         || stream.write_all(request.as_bytes()).is_err()
@@ -130,7 +151,7 @@ impl Collector {
         let sockets = command("ss", &["-H", "-ltnp"]).unwrap_or_default();
         let entries = SERVICES
             .iter()
-            .map(|(unit, name, fallback)| {
+            .map(|(unit, name, fallback, path)| {
                 let values = units.get(*unit);
                 let get = |key: &str| values.and_then(|p| p.get(key)).map(String::as_str);
                 let state = if get("LoadState") == Some("not-found") {
@@ -145,17 +166,17 @@ impl Collector {
                 } else {
                     detected.first().copied().unwrap_or(*fallback)
                 };
-                (*unit, *name, state, port)
+                (*unit, *name, state, probe_address(&sockets, port), *path)
             })
             .collect::<Vec<_>>();
         // The ten local checks run together so one slow app cannot stall sampling.
         let probes = thread::scope(|scope| {
             entries
                 .iter()
-                .map(|(_, _, state, port)| {
+                .map(|(_, _, state, address, path)| {
                     scope.spawn(move || {
                         if *state == "active" {
-                            probe(*port)
+                            probe(*address, path)
                         } else {
                             Probe::default()
                         }
@@ -169,7 +190,7 @@ impl Collector {
         let rows = entries
             .into_iter()
             .zip(probes)
-            .map(|((unit, name, state, port), probe)| {
+            .map(|((unit, name, state, address, _path), probe)| {
                 let reachable = probe
                     .status
                     .is_some_and(|status| (200..500).contains(&status));
@@ -180,7 +201,7 @@ impl Collector {
                     ("unit", quote(unit)),
                     ("name", quote(name)),
                     ("state", quote(state)),
-                    ("port", port.to_string()),
+                    ("port", address.port().to_string()),
                     ("http_status", number(probe.status)),
                     ("latency_ms", number(probe.latency_ms)),
                     (
@@ -210,6 +231,21 @@ mod tests {
             BTreeSet::from([3000])
         );
         assert!(ports(sockets, 0).is_empty());
+    }
+
+    #[test]
+    fn probes_the_address_a_service_actually_binds() {
+        let sockets =
+            "LISTEN 0 128 0.0.0.0:9999 0.0.0.0:*\nLISTEN 0 128 192.168.0.25:5644 0.0.0.0:*";
+        assert_eq!(
+            probe_address(sockets, 5644),
+            "192.168.0.25:5644".parse().unwrap()
+        );
+        assert_eq!(
+            probe_address(sockets, 9999),
+            "127.0.0.1:9999".parse().unwrap()
+        );
+        assert_eq!(probe_address("", 3444), "127.0.0.1:3444".parse().unwrap());
     }
 
     #[test]
