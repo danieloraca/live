@@ -99,16 +99,17 @@ export class HistoryChart {
     this.points = [];
     this.selection = null;
     this.pinned = false;
+    this.thermal = id === "thermal";
+    this.plotHeight = this.thermal ? 238 : 160;
     const host = document.getElementById(id + "-view");
     // The markup and identifiers here are fixed application strings.
-    host.innerHTML = `<div class="chart-layout${id === "thermal" ? " thermal-layout" : ""}">
-      <div class="chart-y-axis" aria-hidden="true"></div>
-      <div class="chart-plot" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0" aria-disabled="true" aria-label="Inspect ${name} history" aria-describedby="${id}-help">
-        <svg class="chart" viewBox="0 0 500 160" preserveAspectRatio="none" aria-hidden="true"></svg>
+    host.innerHTML = `<div class="chart-layout${this.thermal ? " thermal-layout" : ""}">
+      <div class="chart-y-axis${this.thermal ? " thermal-y-axis" : ""}" aria-hidden="true"></div>
+      <div class="chart-plot${this.thermal ? " thermal-plot" : ""}" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0" aria-disabled="true" aria-label="Inspect ${name} history" aria-describedby="${id}-help">
+        <svg class="chart" viewBox="0 0 500 ${this.plotHeight}" preserveAspectRatio="none" aria-hidden="true"></svg>
         <div class="chart-missing-labels" aria-hidden="true"></div>
-        <svg class="chart-cursor" viewBox="0 0 500 160" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <svg class="chart-cursor" viewBox="0 0 500 ${this.plotHeight}" preserveAspectRatio="none" aria-hidden="true"></svg>
       </div>
-      ${id === "thermal" ? '<div class="chart-right-axis" aria-hidden="true"></div>' : ""}
       <div class="chart-time-axis" aria-hidden="true"></div>
     </div><span class="sr-only" id="${id}-help">Hover or tap for a reading. Use Left and Right arrow keys, Home, or End to explore. Escape clears the selection.</span>
     <output class="chart-readout" aria-live="polite" aria-atomic="true"></output>`;
@@ -117,7 +118,6 @@ export class HistoryChart {
     this.cursor = host.querySelector(".chart-cursor");
     this.labels = host.querySelector(".chart-missing-labels");
     this.yAxis = host.querySelector(".chart-y-axis");
-    this.rightAxis = host.querySelector(".chart-right-axis");
     this.timeAxis = host.querySelector(".chart-time-axis");
     this.readout = host.querySelector(".chart-readout");
     const pointAt = (event) => {
@@ -171,33 +171,51 @@ export class HistoryChart {
     this.end = end;
     this.resolution = resolution;
     this.loading = loading;
-    this.ceiling = this.id === "cpu" || this.id === "thermal" ? 100 : networkScale(points);
-    if (this.id === "thermal") {
+    this.ceiling = this.id === "cpu" || this.thermal ? 100 : networkScale(points);
+    if (this.thermal) {
       const peak = Math.max(0, ...points.map((p) => p.frequency).filter(known));
       this.frequencyCeiling = Math.max(1000, Math.ceil(peak * 1.1 / 500) * 500);
     }
     this.x = (timestamp) => (timestamp - start) / (end - start) * 500;
-    this.y = (value, key) => 154 - Math.max(0, Math.min(value / (key === "frequency" ? this.frequencyCeiling : this.ceiling), 1)) * 148;
+    this.y = (value, key) => {
+      if (this.thermal) {
+        const bottom = key === "frequency" ? 232 : 106;
+        const ceiling = key === "frequency" ? this.frequencyCeiling : 100;
+        return bottom - Math.max(0, Math.min(value / ceiling, 1)) * 100;
+      }
+      return 154 - Math.max(0, Math.min(value / this.ceiling, 1)) * 148;
+    };
     this.svg.replaceChildren();
     this.yAxis.replaceChildren();
-    this.rightAxis?.replaceChildren();
     this.labels.replaceChildren();
-    for (const fraction of [1, .75, .5, .25, 0]) {
-      const label = document.createElement("span");
-      label.textContent = this.id === "cpu" ? fraction * 100 + "%" : this.id === "thermal" ? fraction * 100 + "°C" : networkTick(this.ceiling * fraction, this.ceiling);
-      this.yAxis.append(label);
-      if (this.rightAxis) {
-        const right = document.createElement("span");
-        right.textContent = frequency(this.frequencyCeiling * fraction);
-        this.rightAxis.append(right);
+    if (this.thermal) {
+      for (const key of this.keys) {
+        const axis = document.createElement("div");
+        axis.className = "thermal-axis-track";
+        for (const fraction of [1, .5, 0]) {
+          const value = (key === "frequency" ? this.frequencyCeiling : 100) * fraction;
+          const label = document.createElement("span");
+          label.textContent = key === "frequency" ? frequency(value) : value + "°C";
+          axis.append(label);
+          const y = this.y(value, key);
+          this.svg.append(svgElement("line", { x1: 0, y1: y, x2: 500, y2: y, class: "chart-grid" }));
+        }
+        this.yAxis.append(axis);
       }
-      const y = this.y(this.ceiling * fraction);
-      this.svg.append(svgElement("line", { x1: 0, y1: y, x2: 500, y2: y, class: "chart-grid" }));
+      this.svg.append(svgElement("line", { x1: 0, y1: 119, x2: 500, y2: 119, class: "chart-track-divider" }));
+    } else {
+      for (const fraction of [1, .75, .5, .25, 0]) {
+        const label = document.createElement("span");
+        label.textContent = this.id === "cpu" ? fraction * 100 + "%" : networkTick(this.ceiling * fraction, this.ceiling);
+        this.yAxis.append(label);
+        const y = this.y(this.ceiling * fraction);
+        this.svg.append(svgElement("line", { x1: 0, y1: y, x2: 500, y2: y, class: "chart-grid" }));
+      }
     }
     for (const span of missingSpans(points, this.keys, start, end, resolution)) {
       const left = this.x(span.start);
       const width = this.x(span.end) - left;
-      this.svg.append(svgElement("rect", { x: left, y: 6, width, height: 148, class: "chart-missing" }));
+      this.svg.append(svgElement("rect", { x: left, y: 6, width, height: this.plotHeight - 12, class: "chart-missing" }));
       if (width >= 120) {
         const label = document.createElement("span");
         label.className = "chart-missing-note";
@@ -207,10 +225,10 @@ export class HistoryChart {
         this.labels.append(label);
       }
     }
-    if (this.id === "thermal") {
+    if (this.thermal) {
       const alerts = points.filter((point) => known(point.throttled) && (point.throttled & 15));
       if (alerts.length) {
-        const d = alerts.map((point) => `M${this.x(point.timestamp).toFixed(2)},6v148`).join(" ");
+        const d = alerts.map((point) => `M${this.x(point.timestamp).toFixed(2)},6v${this.plotHeight - 12}`).join(" ");
         this.svg.append(svgElement("path", { d, class: "chart-alert" }));
       }
     }
@@ -265,7 +283,7 @@ export class HistoryChart {
     this.selection = timestamp;
     this.plot.setAttribute("aria-valuenow", Math.round(timestamp));
     const x = this.x(timestamp);
-    this.cursor.append(svgElement("line", { x1: x, y1: 6, x2: x, y2: 154, class: "chart-crosshair" }));
+    this.cursor.append(svgElement("line", { x1: x, y1: 6, x2: x, y2: this.plotHeight - 6, class: "chart-crosshair" }));
     time.textContent = date(timestamp) + " · " + clock(timestamp, this.resolution === 5);
     if (point && this.resolution > 5) {
       const bucketStart = Math.floor(timestamp / this.resolution) * this.resolution;
