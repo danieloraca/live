@@ -15,6 +15,9 @@ pub struct Point {
     pub cpu: Option<f64>,
     pub rx: Option<f64>,
     pub tx: Option<f64>,
+    pub temperature: Option<f64>,
+    pub frequency: Option<f64>,
+    pub throttled: Option<u32>,
 }
 
 impl Point {
@@ -24,6 +27,9 @@ impl Point {
             ("cpu", number(self.cpu)),
             ("rx", number(self.rx)),
             ("tx", number(self.tx)),
+            ("temperature", number(self.temperature)),
+            ("frequency", number(self.frequency)),
+            ("throttled", number(self.throttled)),
         ])
     }
 }
@@ -105,13 +111,14 @@ impl Summary {
 #[derive(Debug, PartialEq)]
 struct History {
     points: Vec<Point>,
-    summary: [Summary; 3],
+    summary: [Summary; 5],
 }
 
 struct Bucket {
     timestamp: u64,
-    sums: [f64; 3],
-    counts: [u64; 3],
+    sums: [f64; 5],
+    counts: [u64; 5],
+    throttled: Option<u32>,
 }
 
 impl Bucket {
@@ -122,18 +129,32 @@ impl Bucket {
         {
             buckets.push(Self {
                 timestamp: point.timestamp,
-                sums: [0.0; 3],
-                counts: [0; 3],
+                sums: [0.0; 5],
+                counts: [0; 5],
+                throttled: None,
             });
         }
         let bucket = buckets.last_mut().unwrap();
         bucket.timestamp = point.timestamp;
-        for (i, value) in [point.cpu, point.rx, point.tx].into_iter().enumerate() {
+        for (i, value) in [
+            point.cpu,
+            point.rx,
+            point.tx,
+            point.temperature,
+            point.frequency,
+        ]
+        .into_iter()
+        .enumerate()
+        {
             if let Some(value) = value {
                 bucket.sums[i] += value;
                 bucket.counts[i] += 1;
             }
         }
+        bucket.throttled = match (bucket.throttled, point.throttled) {
+            (Some(before), Some(current)) => Some(before | current),
+            (before, current) => before.or(current),
+        };
     }
 
     fn point(self) -> Point {
@@ -149,6 +170,9 @@ impl Bucket {
             cpu: average(0),
             rx: average(1),
             tx: average(2),
+            temperature: average(3),
+            frequency: average(4),
+            throttled: self.throttled,
         }
     }
 }
@@ -164,23 +188,33 @@ impl Store {
         let connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(1))?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 1 {
+        if version > 2 {
             return Err(format!("Unsupported history database version {version}").into());
         }
         connection.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=FULL;
-             PRAGMA cache_size=-2048;
-             BEGIN;
-             CREATE TABLE IF NOT EXISTS samples (
-                 timestamp INTEGER PRIMARY KEY CHECK(timestamp >= 0),
-                 cpu REAL,
-                 rx REAL,
-                 tx REAL
-             );
-             PRAGMA user_version=1;
-             COMMIT;",
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA cache_size=-2048;",
         )?;
+        if version == 0 {
+            connection.execute_batch(
+                "BEGIN;
+                 CREATE TABLE samples (
+                     timestamp INTEGER PRIMARY KEY CHECK(timestamp >= 0),
+                     cpu REAL, rx REAL, tx REAL,
+                     temperature REAL, frequency REAL, throttled INTEGER
+                 );
+                 PRAGMA user_version=2;
+                 COMMIT;",
+            )?;
+        } else if version == 1 {
+            connection.execute_batch(
+                "BEGIN;
+                 ALTER TABLE samples ADD COLUMN temperature REAL;
+                 ALTER TABLE samples ADD COLUMN frequency REAL;
+                 ALTER TABLE samples ADD COLUMN throttled INTEGER;
+                 PRAGMA user_version=2;
+                 COMMIT;",
+            )?;
+        }
         let persisted_through =
             connection.query_row("SELECT MAX(timestamp) FROM samples", [], |r| {
                 Ok(r.get::<_, Option<i64>>(0)?.map(|t| t as u64))
@@ -224,15 +258,21 @@ impl Store {
         let transaction = self.connection.transaction()?;
         {
             let mut insert = transaction.prepare(
-                "INSERT INTO samples (timestamp, cpu, rx, tx) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(timestamp) DO UPDATE SET cpu=excluded.cpu, rx=excluded.rx, tx=excluded.tx",
+                "INSERT INTO samples (timestamp, cpu, rx, tx, temperature, frequency, throttled)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(timestamp) DO UPDATE SET cpu=excluded.cpu, rx=excluded.rx,
+                 tx=excluded.tx, temperature=excluded.temperature,
+                 frequency=excluded.frequency, throttled=excluded.throttled",
             )?;
             for point in &self.pending {
                 insert.execute(params![
                     point.timestamp as i64,
                     point.cpu,
                     point.rx,
-                    point.tx
+                    point.tx,
+                    point.temperature,
+                    point.frequency,
+                    point.throttled,
                 ])?;
             }
         }
@@ -283,7 +323,8 @@ impl Store {
         // SQL GROUP BY on timestamp / resolution would sort all raw rows and can
         // spill to a temporary disk file when requesting a month of readings.
         let mut statement = self.connection.prepare(
-            "SELECT timestamp, cpu, rx, tx FROM samples WHERE timestamp BETWEEN ?1 AND ?2 ORDER BY timestamp",
+            "SELECT timestamp, cpu, rx, tx, temperature, frequency, throttled
+             FROM samples WHERE timestamp BETWEEN ?1 AND ?2 ORDER BY timestamp",
         )?;
         let rows = statement.query_map(params![start as i64, end as i64], |row| {
             Ok(Point {
@@ -291,12 +332,21 @@ impl Store {
                 cpu: row.get(1)?,
                 rx: row.get(2)?,
                 tx: row.get(3)?,
+                temperature: row.get(4)?,
+                frequency: row.get(5)?,
+                throttled: row.get(6)?,
             })
         })?;
         let mut buckets = Vec::new();
-        let mut summary: [Summary; 3] = Default::default();
+        let mut summary: [Summary; 5] = Default::default();
         let mut record = |point: Point| {
-            for (stat, value) in summary.iter_mut().zip([point.cpu, point.rx, point.tx]) {
+            for (stat, value) in summary.iter_mut().zip([
+                point.cpu,
+                point.rx,
+                point.tx,
+                point.temperature,
+                point.frequency,
+            ]) {
                 stat.record(value);
             }
             Bucket::push(&mut buckets, point, resolution);
@@ -347,6 +397,8 @@ impl Store {
                     ("cpu", history.summary[0].json()),
                     ("rx", history.summary[1].json()),
                     ("tx", history.summary[2].json()),
+                    ("temperature", history.summary[3].json()),
+                    ("frequency", history.summary[4].json()),
                 ]),
             ),
         ]))
@@ -363,6 +415,9 @@ mod tests {
             cpu,
             rx: Some(100.0),
             tx: None,
+            temperature: None,
+            frequency: None,
+            throttled: None,
         }
     }
 
@@ -395,6 +450,59 @@ mod tests {
             .query_row("PRAGMA integrity_check", [], |r| r.get(0))
             .unwrap();
         assert_eq!(integrity, "ok");
+    }
+
+    #[test]
+    fn upgrades_existing_history_without_losing_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.sqlite3");
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE samples (timestamp INTEGER PRIMARY KEY, cpu REAL, rx REAL, tx REAL);
+             INSERT INTO samples VALUES (100, 20, 30, 40);
+             PRAGMA user_version=1;",
+        )
+        .unwrap();
+        drop(old);
+        let store = Store::open(&path).unwrap();
+        let saved = store.query(Range::parse("").unwrap(), 100).unwrap();
+        assert_eq!(saved.points.len(), 1);
+        assert_eq!(saved.points[0].cpu, Some(20.0));
+        assert_eq!(saved.points[0].temperature, None);
+        let version: i64 = store
+            .connection
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+    }
+
+    #[test]
+    fn thermal_history_averages_readings_and_preserves_alerts() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("history.sqlite3")).unwrap();
+        store.record(Point {
+            timestamp: 60,
+            temperature: Some(50.0),
+            frequency: Some(1500.0),
+            throttled: Some(0),
+            ..point(60, None)
+        });
+        store.record(Point {
+            timestamp: 65,
+            temperature: Some(60.0),
+            frequency: Some(2000.0),
+            throttled: Some(4),
+            ..point(65, None)
+        });
+        let result = store
+            .query(Range::parse("minutes=1440").unwrap(), 65)
+            .unwrap();
+        assert_eq!(result.points.len(), 1);
+        assert_eq!(result.points[0].temperature, Some(55.0));
+        assert_eq!(result.points[0].frequency, Some(1750.0));
+        assert_eq!(result.points[0].throttled, Some(4));
+        assert_eq!(result.summary[3].peak, Some(60.0));
+        assert_eq!(result.summary[4].peak, Some(2000.0));
     }
 
     #[test]
@@ -483,7 +591,8 @@ mod tests {
             .execute_batch(
                 "WITH RECURSIVE ticks(t) AS (
                  SELECT 0 UNION ALL SELECT t + 5 FROM ticks WHERE t < 2592000
-             ) INSERT INTO samples SELECT t, t % 100, 100, NULL FROM ticks;",
+             ) INSERT INTO samples (timestamp, cpu, rx, tx)
+               SELECT t, t % 100, 100, NULL FROM ticks;",
             )
             .unwrap();
         let month = store

@@ -6,12 +6,13 @@ bundled SQLite and no JavaScript framework, external fonts, or third-party reque
 The dashboard includes:
 
 - Uptime, CPU usage and core count, available/used RAM, and SoC temperature.
-- Persistent CPU and physical-network history, with 15-minute, one-hour,
-  24-hour, 7-day, and 30-day views.
+- Persistent CPU, physical-network, temperature, CPU-clock, and hardware-alert
+  history, with 15-minute, one-hour, 24-hour, 7-day, and 30-day views.
 - Root filesystem usage, load averages, CPU clock, swap, and process count.
 - Download/upload rates and interface transfer totals.
 - Raspberry Pi throttling and undervoltage warnings when vcgencmd is available.
-- Configured app links, including Elite on port 3141, with their systemd states and TCP ports.
+- Configured app links, including Elite on port 3141, with their systemd states,
+  HTTP response times, and last replies.
 
 ## Run
 
@@ -36,14 +37,18 @@ replaced with sample data. Disk usage can still be read locally.
 ## Data and refresh behavior
 
 Hardware samples are collected every five seconds in one background sampler.
-Service states, disk space, and Pi firmware flags are checked every 30 seconds.
+Service states, HTTP responses, and disk space are checked every 30 seconds.
+Pi firmware temperature, actual ARM clock, and throttle flags are sampled every
+five seconds when `vcgencmd` is available; `/sys` provides temperature and
+clock fallbacks.
 The browser fetches cached readings; extra visitors do not trigger extra probes.
 
-CPU percentage and physical-network download/upload rates are saved to SQLite
-at their original five-second resolution, including timestamps and missing
-readings. **History is kept indefinitely, with no automatic expiry or downsampling
-on disk.** It accumulates with no page open and survives process and Pi restarts.
-Readings collected before this feature was installed cannot be recovered.
+CPU percentage, physical-network download/upload rates, temperature, clock, and
+throttle flags are saved to SQLite at their original five-second resolution,
+including timestamps and missing readings. **History is kept indefinitely, with
+no automatic expiry or downsampling on disk.** It accumulates with no page open
+and survives process and Pi restarts. Existing databases migrate in place;
+temperature, clock, and alert history starts when this version is installed.
 
 The database defaults to `data/history.sqlite3` relative to the working directory.
 With the existing systemd unit, this is
@@ -73,13 +78,17 @@ averaged views cannot show gaps shorter than their bucket size. Hidden tabs
 pause polling and reload saved history when reopened. Longer views reload every
 30 seconds while current readings still refresh every five seconds.
 
-Both charts show labeled scales, local timestamps, and Now/Average/Peak summaries.
+The charts show labeled scales, local timestamps, and period summaries.
 CPU stays on a fixed 0–100% scale; the network scale adapts to traffic and labels
-its units. Period summaries use the original samples, excluding missing readings,
-so peaks remain accurate even when the plotted line is averaged. Hover or tap to
-inspect a reading, or focus the chart and use arrow keys, Home, and End. Escape
-clears the selection. Averaged readings identify their time bucket. Unrecorded
-periods are marked as missing rather than drawn as zero.
+its units. The thermal chart has separate axes for temperature and ARM clock;
+red markers show samples with active throttle, temperature, or undervoltage
+flags. The firmware's latched "occurred since boot" bits are retained but do not
+create event markers with an invented timestamp. Period summaries use original
+samples, excluding missing readings, so peaks remain accurate even when the
+plotted line is averaged. Hover or tap to inspect a reading, or focus the chart
+and use arrow keys, Home, and End. Escape clears the selection. Averaged readings
+identify their time bucket. Unrecorded periods are marked as missing rather than
+drawn as zero.
 
 Disk use grows as history accumulates. For a consistent backup, stop the service,
 copy the database and any remaining `-wal`/`-shm` sidecars together, then restart
@@ -93,8 +102,9 @@ Read-only endpoints:
 - GET /api/history?minutes=60: an object with `points`, `resolution_seconds`, and
   `summary` (per-metric `average`, `peak`, and valid `samples` count).
   Supported minute values: `15`, `60` (default), `1440`, `10080`, `43200`.
-  Each point contains `timestamp`, `cpu`, `rx`, and `tx`. CPU is a percentage;
-  network rates are bytes/second. Unsupported ranges return HTTP 400.
+  Each point contains `timestamp`, `cpu`, `rx`, `tx`, `temperature`, `frequency`,
+  and `throttled`. CPU is a percentage; network rates are bytes/second;
+  temperature is °C and ARM clock is MHz. Unsupported ranges return HTTP 400.
   This replaces the previous bare-array history response.
 
 Linux data comes from /proc and /sys. RAM usage uses MemAvailable so reclaimable
@@ -104,12 +114,16 @@ physical interfaces only, excluding loopback and Docker bridges/veth devices.
 Transfers count bytes since each interface started; a reset starts a new rate
 baseline. Root disk availability excludes reserved space.
 
-Service state reflects systemd, not an HTTP health check. Ports are detected
-from the main process's TCP listeners when permissions allow. Configured ports
-remain fallbacks for wrapper/container services. Configure entries in
-src/services.rs. Commands are bounded to two seconds; unavailable metrics
-remain null. Request workers are bounded, and disconnected clients do not stop
-the server.
+Service state reflects systemd. For each active service, the dashboard also
+requests `/` over HTTP on `127.0.0.1` with a bounded timeout. A 2xx–4xx
+response updates its last reply; 5xx responses and timeouts warn. The 404 at
+IP Location's API-only root is therefore visible without marking the service
+unreachable. Last-reply times reset when this dashboard restarts. Ports are
+detected from the main process's TCP listeners when
+permissions allow. Configured ports remain fallbacks for wrapper/container
+services. Configure entries in src/services.rs. System commands are bounded to
+two seconds; unavailable metrics remain null. Request workers are bounded, and
+disconnected clients do not stop the server.
 
 No visitor tracking is enabled.
 

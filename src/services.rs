@@ -1,5 +1,9 @@
-use crate::util::{command, object, quote};
+use crate::util::{command, now, number, object, quote};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::thread;
+use std::time::{Duration, Instant};
 
 // Ports are fallbacks when systemd's main process is a wrapper (for example Docker).
 const SERVICES: &[(&str, &str, u16)] = &[
@@ -48,42 +52,146 @@ fn ports(output: &str, pid: u32) -> BTreeSet<u16> {
         .collect()
 }
 
-pub fn collect() -> String {
-    let mut args = vec![
-        "show",
-        "--no-pager",
-        "--property=Id,ActiveState,MainPID,LoadState",
-    ];
-    args.extend(SERVICES.iter().map(|service| service.0));
-    let units = properties(&command("systemctl", &args).unwrap_or_default());
-    // TCP listeners only: a UDP socket is not necessarily a web endpoint.
-    let sockets = command("ss", &["-H", "-ltnp"]).unwrap_or_default();
-    let rows = SERVICES
-        .iter()
-        .map(|(unit, name, fallback)| {
-            let values = units.get(*unit);
-            let get = |key: &str| values.and_then(|p| p.get(key)).map(String::as_str);
-            let state = if get("LoadState") == Some("not-found") {
-                "unknown"
-            } else {
-                get("ActiveState").unwrap_or("unknown")
-            };
-            let pid = get("MainPID").and_then(|s| s.parse().ok()).unwrap_or(0);
-            let detected = ports(&sockets, pid);
-            let port = if detected.contains(fallback) {
-                *fallback
-            } else {
-                detected.first().copied().unwrap_or(*fallback)
-            };
-            object(&[
-                ("unit", quote(unit)),
-                ("name", quote(name)),
-                ("state", quote(state)),
-                ("port", port.to_string()),
-            ])
-        })
-        .collect::<Vec<_>>();
-    format!("[{}]", rows.join(","))
+#[derive(Default)]
+pub struct Collector {
+    last_response: BTreeMap<&'static str, u64>,
+}
+
+#[derive(Default)]
+struct Probe {
+    status: Option<u16>,
+    latency_ms: Option<f64>,
+}
+
+fn probe(port: u16) -> Probe {
+    let timeout = Duration::from_secs(2);
+    let start = Instant::now();
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, timeout) else {
+        return Probe::default();
+    };
+    let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    if stream.set_read_timeout(Some(timeout)).is_err()
+        || stream.set_write_timeout(Some(timeout)).is_err()
+        || stream.write_all(request.as_bytes()).is_err()
+    {
+        return Probe::default();
+    }
+    let mut response = Vec::with_capacity(128);
+    let mut buffer = [0; 128];
+    while response.len() < 512 {
+        let Ok(read) = stream.read(&mut buffer) else {
+            return Probe::default();
+        };
+        if read == 0 {
+            break;
+        }
+        response.extend_from_slice(&buffer[..read]);
+        if response.contains(&b'\n') {
+            break;
+        }
+    }
+    let status = parse_status(&response);
+    Probe {
+        status,
+        latency_ms: status.map(|_| start.elapsed().as_secs_f64() * 1000.0),
+    }
+}
+
+fn parse_status(response: &[u8]) -> Option<u16> {
+    let first_line = String::from_utf8_lossy(response);
+    let mut fields = first_line
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .split_whitespace();
+    if !fields
+        .next()
+        .is_some_and(|version| version.starts_with("HTTP/"))
+    {
+        return None;
+    }
+    fields
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|value| (100..=599).contains(value))
+}
+
+impl Collector {
+    pub fn collect(&mut self) -> String {
+        let mut args = vec![
+            "show",
+            "--no-pager",
+            "--property=Id,ActiveState,MainPID,LoadState",
+        ];
+        args.extend(SERVICES.iter().map(|service| service.0));
+        let units = properties(&command("systemctl", &args).unwrap_or_default());
+        // TCP listeners only: a UDP socket is not necessarily a web endpoint.
+        let sockets = command("ss", &["-H", "-ltnp"]).unwrap_or_default();
+        let entries = SERVICES
+            .iter()
+            .map(|(unit, name, fallback)| {
+                let values = units.get(*unit);
+                let get = |key: &str| values.and_then(|p| p.get(key)).map(String::as_str);
+                let state = if get("LoadState") == Some("not-found") {
+                    "unknown"
+                } else {
+                    get("ActiveState").unwrap_or("unknown")
+                };
+                let pid = get("MainPID").and_then(|s| s.parse().ok()).unwrap_or(0);
+                let detected = ports(&sockets, pid);
+                let port = if detected.contains(fallback) {
+                    *fallback
+                } else {
+                    detected.first().copied().unwrap_or(*fallback)
+                };
+                (*unit, *name, state, port)
+            })
+            .collect::<Vec<_>>();
+        // The ten local checks run together so one slow app cannot stall sampling.
+        let probes = thread::scope(|scope| {
+            entries
+                .iter()
+                .map(|(_, _, state, port)| {
+                    scope.spawn(move || {
+                        if *state == "active" {
+                            probe(*port)
+                        } else {
+                            Probe::default()
+                        }
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|task| task.join().unwrap_or_default())
+                .collect::<Vec<_>>()
+        });
+        let rows = entries
+            .into_iter()
+            .zip(probes)
+            .map(|((unit, name, state, port), probe)| {
+                let reachable = probe
+                    .status
+                    .is_some_and(|status| (200..500).contains(&status));
+                if reachable {
+                    self.last_response.insert(unit, now());
+                }
+                object(&[
+                    ("unit", quote(unit)),
+                    ("name", quote(name)),
+                    ("state", quote(state)),
+                    ("port", port.to_string()),
+                    ("http_status", number(probe.status)),
+                    ("latency_ms", number(probe.latency_ms)),
+                    (
+                        "last_response",
+                        number(self.last_response.get(unit).copied()),
+                    ),
+                ])
+            })
+            .collect::<Vec<_>>();
+        format!("[{}]", rows.join(","))
+    }
 }
 
 #[cfg(test)]
@@ -111,5 +219,15 @@ mod tests {
         );
         assert_eq!(data["live.service"]["ActiveState"], "active");
         assert_eq!(data["jirpi.service"]["ActiveState"], "failed");
+    }
+
+    #[test]
+    fn http_status_parser_accepts_success_and_errors() {
+        assert_eq!(parse_status(b"HTTP/1.1 204 No Content\r\n"), Some(204));
+        assert_eq!(
+            parse_status(b"HTTP/1.0 503 Service Unavailable\r\n"),
+            Some(503)
+        );
+        assert_eq!(parse_status(b"garbage\r\n"), None);
     }
 }

@@ -83,13 +83,14 @@ fn sample(
     stopping: Arc<AtomicBool>,
 ) -> rusqlite::Result<()> {
     let mut collector = metrics::Collector::new();
+    let mut service_collector = services::Collector::default();
     let mut service_data = "[]".to_owned();
     let mut services_updated_at = 0;
     let mut cycle = 0u64;
     while !stopping.load(Ordering::Relaxed) {
         let started = Instant::now();
         if cycle.is_multiple_of(6) {
-            service_data = services::collect();
+            service_data = service_collector.collect();
             services_updated_at = util::now();
         }
         let snapshot = collector.collect(cycle.is_multiple_of(6));
@@ -107,7 +108,11 @@ fn sample(
         ]);
         state.write().unwrap().status = status;
         cycle = cycle.wrapping_add(1);
-        thread::park_timeout(INTERVAL.saturating_sub(started.elapsed()));
+        let next_sample = started + INTERVAL;
+        while !stopping.load(Ordering::Relaxed) && Instant::now() < next_sample {
+            // Joining probe threads can leave an unpark token; keep the sample cadence.
+            thread::park_timeout(next_sample.saturating_duration_since(Instant::now()));
+        }
     }
     history.lock().unwrap().flush()
 }

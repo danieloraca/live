@@ -10,6 +10,19 @@ export function bytes(value, decimals = 1) {
 }
 
 export const rate = (value) => known(value) ? bytes(value) + "/s" : "—";
+export const frequency = (value) => known(value) ? value >= 1000
+  ? (value / 1000).toFixed(2).replace(/0$/, "") + " GHz"
+  : Math.round(value) + " MHz" : "—";
+
+export function alertNames(flags) {
+  if (!known(flags)) return "Flags unavailable";
+  const names = [];
+  if (flags & 1) names.push("undervoltage");
+  if (flags & 2) names.push("clock capped");
+  if (flags & 4) names.push("throttled");
+  if (flags & 8) names.push("temperature limit");
+  return names.length ? names.join(", ") : "No active flags";
+}
 
 export function summarize(points, key) {
   const values = points.map((p) => p[key]).filter(known);
@@ -88,13 +101,14 @@ export class HistoryChart {
     this.pinned = false;
     const host = document.getElementById(id + "-view");
     // The markup and identifiers here are fixed application strings.
-    host.innerHTML = `<div class="chart-layout">
+    host.innerHTML = `<div class="chart-layout${id === "thermal" ? " thermal-layout" : ""}">
       <div class="chart-y-axis" aria-hidden="true"></div>
       <div class="chart-plot" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0" aria-disabled="true" aria-label="Inspect ${name} history" aria-describedby="${id}-help">
         <svg class="chart" viewBox="0 0 500 160" preserveAspectRatio="none" aria-hidden="true"></svg>
         <div class="chart-missing-labels" aria-hidden="true"></div>
         <svg class="chart-cursor" viewBox="0 0 500 160" preserveAspectRatio="none" aria-hidden="true"></svg>
       </div>
+      ${id === "thermal" ? '<div class="chart-right-axis" aria-hidden="true"></div>' : ""}
       <div class="chart-time-axis" aria-hidden="true"></div>
     </div><span class="sr-only" id="${id}-help">Hover or tap for a reading. Use Left and Right arrow keys, Home, or End to explore. Escape clears the selection.</span>
     <output class="chart-readout" aria-live="polite" aria-atomic="true"></output>`;
@@ -103,6 +117,7 @@ export class HistoryChart {
     this.cursor = host.querySelector(".chart-cursor");
     this.labels = host.querySelector(".chart-missing-labels");
     this.yAxis = host.querySelector(".chart-y-axis");
+    this.rightAxis = host.querySelector(".chart-right-axis");
     this.timeAxis = host.querySelector(".chart-time-axis");
     this.readout = host.querySelector(".chart-readout");
     const pointAt = (event) => {
@@ -156,16 +171,26 @@ export class HistoryChart {
     this.end = end;
     this.resolution = resolution;
     this.loading = loading;
-    this.ceiling = this.id === "cpu" ? 100 : networkScale(points);
+    this.ceiling = this.id === "cpu" || this.id === "thermal" ? 100 : networkScale(points);
+    if (this.id === "thermal") {
+      const peak = Math.max(0, ...points.map((p) => p.frequency).filter(known));
+      this.frequencyCeiling = Math.max(1000, Math.ceil(peak * 1.1 / 500) * 500);
+    }
     this.x = (timestamp) => (timestamp - start) / (end - start) * 500;
-    this.y = (value) => 154 - Math.max(0, Math.min(value / this.ceiling, 1)) * 148;
+    this.y = (value, key) => 154 - Math.max(0, Math.min(value / (key === "frequency" ? this.frequencyCeiling : this.ceiling), 1)) * 148;
     this.svg.replaceChildren();
     this.yAxis.replaceChildren();
+    this.rightAxis?.replaceChildren();
     this.labels.replaceChildren();
     for (const fraction of [1, .75, .5, .25, 0]) {
       const label = document.createElement("span");
-      label.textContent = this.id === "cpu" ? fraction * 100 + "%" : networkTick(this.ceiling * fraction, this.ceiling);
+      label.textContent = this.id === "cpu" ? fraction * 100 + "%" : this.id === "thermal" ? fraction * 100 + "°C" : networkTick(this.ceiling * fraction, this.ceiling);
       this.yAxis.append(label);
+      if (this.rightAxis) {
+        const right = document.createElement("span");
+        right.textContent = frequency(this.frequencyCeiling * fraction);
+        this.rightAxis.append(right);
+      }
       const y = this.y(this.ceiling * fraction);
       this.svg.append(svgElement("line", { x1: 0, y1: y, x2: 500, y2: y, class: "chart-grid" }));
     }
@@ -182,13 +207,20 @@ export class HistoryChart {
         this.labels.append(label);
       }
     }
+    if (this.id === "thermal") {
+      const alerts = points.filter((point) => known(point.throttled) && (point.throttled & 15));
+      if (alerts.length) {
+        const d = alerts.map((point) => `M${this.x(point.timestamp).toFixed(2)},6v148`).join(" ");
+        this.svg.append(svgElement("path", { d, class: "chart-alert" }));
+      }
+    }
     for (const key of this.keys) {
       for (const segment of segments(points, key, resolution)) {
         if (segment.length === 1) {
-          this.svg.append(svgElement("circle", { cx: this.x(segment[0].timestamp), cy: this.y(segment[0][key]), r: 2, class: "chart-point " + key }));
+          this.svg.append(svgElement("circle", { cx: this.x(segment[0].timestamp), cy: this.y(segment[0][key], key), r: 2, class: "chart-point " + key }));
           continue;
         }
-        const d = segment.map((p, i) => (i ? "L" : "M") + this.x(p.timestamp).toFixed(2) + "," + this.y(p[key]).toFixed(2)).join(" ");
+        const d = segment.map((p, i) => (i ? "L" : "M") + this.x(p.timestamp).toFixed(2) + "," + this.y(p[key], key).toFixed(2)).join(" ");
         if (key === "cpu") this.svg.append(svgElement("path", { d: d + ` L${this.x(segment.at(-1).timestamp)},154 L${this.x(segment[0].timestamp)},154 Z`, class: "chart-area" }));
         this.svg.append(svgElement("path", { d, class: "chart-line " + key }));
       }
@@ -241,9 +273,11 @@ export class HistoryChart {
     }
     if (!point || !this.keys.some((key) => known(point[key]))) values.textContent = "No recorded data";
     else {
-      values.textContent = this.id === "cpu" ? "CPU " + percent(point.cpu) : "↓ " + rate(point.rx) + "  ↑ " + rate(point.tx);
+      values.textContent = this.id === "cpu" ? "CPU " + percent(point.cpu) : this.id === "thermal"
+        ? (known(point.temperature) ? point.temperature.toFixed(1) + "°C" : "—") + " · " + frequency(point.frequency) + " · " + alertNames(point.throttled)
+        : "↓ " + rate(point.rx) + "  ↑ " + rate(point.tx);
       for (const key of this.keys) {
-        if (known(point[key])) this.cursor.append(svgElement("circle", { cx: x, cy: this.y(point[key]), r: 3.5, class: "chart-point " + key }));
+        if (known(point[key])) this.cursor.append(svgElement("circle", { cx: x, cy: this.y(point[key], key), r: 3.5, class: "chart-point " + key }));
       }
     }
     const spoken = point && this.id === "network" ? "Download " + rate(point.rx) + ", upload " + rate(point.tx) : values.textContent;

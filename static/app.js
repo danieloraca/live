@@ -1,4 +1,4 @@
-import { HistoryChart, known, percent, bytes, rate, summarize } from "./charts.mjs";
+import { HistoryChart, known, percent, bytes, rate, frequency, summarize } from "./charts.mjs";
 
 const $ = (id) => document.getElementById(id);
 const text = (id, value) => { $(id).textContent = value; };
@@ -20,6 +20,7 @@ let historyResolution = 5;
 let historySummary = null;
 const cpuChart = new HistoryChart("cpu", ["cpu"], "CPU usage");
 const networkChart = new HistoryChart("network", ["rx", "tx"], "network activity");
+const thermalChart = new HistoryChart("thermal", ["temperature", "frequency"], "temperature and CPU clock");
 let historyMinutes = null;
 let historyFailed = false;
 let lastHistoryLoad = 0;
@@ -40,6 +41,7 @@ function health(data, stale) {
   if (services.some((s) => s.state === "failed")) setHealth("A service needs attention", "warning");
   else if (!services.length || services.every((s) => s.state === "unknown")) setHealth("Service status unavailable", "warning");
   else if (active !== services.length) setHealth("Some services aren’t running", "warning");
+  else if (services.some((s) => s.state === "active" && (!known(s.http_status) || s.http_status >= 500))) setHealth("An app needs attention", "warning");
   else if (known(data.metrics.throttled) && (data.metrics.throttled & 15)) setHealth("Hardware needs attention", "warning");
   else setHealth("All services running");
 }
@@ -77,7 +79,9 @@ function renderServices(services) {
     link.href = url.href;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.setAttribute("aria-label", service.name + ", " + service.state + ", port " + service.port + ", opens in a new tab");
+    const http = known(service.http_status) ? "HTTP " + service.http_status + " · " + Math.round(service.latency_ms) + " ms" : service.state === "active" ? "No HTTP response" : "Not checked";
+    const lastReply = known(service.last_response) ? new Date(service.last_response * 1000).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+    link.setAttribute("aria-label", service.name + ", " + service.state + ", port " + service.port + ", " + http + ", last HTTP reply " + lastReply + ", opens in a new tab");
     const label = document.createElement("span");
     label.className = "service-label";
     const icon = document.createElement("span");
@@ -100,13 +104,19 @@ function renderServices(services) {
     const dot = document.createElement("span");
     dot.className = "dot";
     state.append(dot, document.createTextNode(service.state.charAt(0).toUpperCase() + service.state.slice(1)));
+    const response = document.createElement("span");
+    response.className = "service-http" + (known(service.http_status) ? service.http_status < 400 ? " ok" : service.http_status < 500 ? " warning" : " error" : service.state === "active" ? " error" : "");
+    response.textContent = http;
+    const last = document.createElement("span");
+    last.className = "service-last";
+    last.textContent = lastReply;
     const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     arrow.setAttribute("class", "icon service-open");
     arrow.setAttribute("aria-hidden", "true");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
     use.setAttribute("href", "#i-arrow");
     arrow.append(use);
-    link.append(label, port, state, arrow);
+    link.append(label, port, state, response, last, arrow);
     return link;
   });
   $("service-list").replaceChildren(...rows);
@@ -144,7 +154,8 @@ function render(data) {
   storage("memory", m.memory);
   storage("disk", m.disk);
   text("load", m.load ? m.load.map((n) => n.toFixed(2)).join(" / ") : "—");
-  text("frequency", known(m.frequency) ? (m.frequency >= 1000 ? (m.frequency / 1000).toFixed(2).replace(/0$/, "") + " GHz" : Math.round(m.frequency) + " MHz") : "—");
+  text("frequency", frequency(m.frequency));
+  text("thermal-now", known(m.temperature) ? m.temperature.toFixed(1) + "°C · " + frequency(m.frequency) : "—");
   text("transferred", known(m.received) ? "↓ " + bytes(m.received, 0) + "  ↑ " + bytes(m.sent, 0) : "—");
   text("swap", m.memory ? bytes(m.memory.swap_used, 0) : "—");
   text("swap-detail", m.memory ? (m.memory.swap_total ? "of " + bytes(m.memory.swap_total) : "No swap configured") : "Available on Linux");
@@ -184,12 +195,17 @@ function renderCharts() {
   const loading = historyMinutes !== minutes;
   cpuChart.render(recent, start, end, historyResolution, loading);
   networkChart.render(recent, start, end, historyResolution, loading);
+  thermalChart.render(recent, start, end, historyResolution, loading);
   for (const key of ["cpu", "rx", "tx"]) {
     const summary = loading ? null : historyResolution === 5 ? summarize(recent, key) : historySummary?.[key];
     const format = key === "cpu" ? percent : rate;
     text(key + "-average", format(summary?.average));
     text(key + "-peak", format(summary?.peak));
   }
+  const temperatureSummary = loading ? null : historyResolution === 5 ? summarize(recent, "temperature") : historySummary?.temperature;
+  text("thermal-peak", known(temperatureSummary?.peak) ? temperatureSummary.peak.toFixed(1) + "°C" : "—");
+  const flagged = recent.filter((p) => known(p.throttled));
+  text("thermal-alerts", loading ? "—" : !flagged.length ? "No data yet" : flagged.some((p) => p.throttled & 15) ? "Observed" : "None recorded");
   const detail = historyResolution === 5 ? "5-second samples" : historyResolution / 60 + "-minute averages";
   text("history-caption", historyFailed ? "Saved history unavailable · retrying" : loading ? "Loading saved history…" : "Last " + label + " · " + detail);
 }
@@ -227,7 +243,7 @@ async function refresh() {
     }
     const m = data.metrics;
     if (historyMinutes === minutes && historyResolution === 5) {
-      const point = { timestamp: m.timestamp, cpu: m.cpu, rx: m.rx, tx: m.tx };
+      const point = { timestamp: m.timestamp, cpu: m.cpu, rx: m.rx, tx: m.tx, temperature: m.temperature, frequency: m.frequency, throttled: m.throttled };
       history = history.filter((p) => p.timestamp !== point.timestamp && p.timestamp >= point.timestamp - minutes * 60);
       history.push(point);
       history.sort((a, b) => a.timestamp - b.timestamp);
@@ -261,6 +277,7 @@ document.querySelectorAll("[data-minutes]").forEach((button) => {
     historySummary = null;
     cpuChart.reset();
     networkChart.reset();
+    thermalChart.reset();
     historyFailed = false;
     needsHistory = true;
     document.querySelectorAll("[data-minutes]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summarize, segments, missingSpans, nearestPoint, networkScale, networkTick, rate } from "../static/charts.mjs";
+import { summarize, segments, missingSpans, nearestPoint, networkScale, networkTick, rate, frequency, alertNames } from "../static/charts.mjs";
 
 test("summaries include zero and exclude missing samples", () => {
   assert.deepEqual(summarize([{ cpu: 0 }, { cpu: 9 }, { cpu: null }, { cpu: NaN }], "cpu"), { average: 4.5, peak: 9, samples: 2 });
@@ -41,4 +41,12 @@ test("network scale contains both directions and uses consistent axis units", ()
   const ceiling = networkScale([{ rx: 100, tx: 3000 }, { rx: null, tx: 0 }]);
   assert.equal(ceiling, 4096);
   assert.deepEqual([1, .75, .5, .25, 0].map((fraction) => networkTick(ceiling * fraction, ceiling)), ["4 KiB/s", "3 KiB/s", "2 KiB/s", "1 KiB/s", "0 KiB/s"]);
+});
+
+test("thermal labels separate active alerts from latched warnings", () => {
+  assert.equal(frequency(1850), "1.85 GHz");
+  assert.equal(frequency(800), "800 MHz");
+  assert.equal(alertNames(0x50000), "No active flags");
+  assert.equal(alertNames(0x50005), "undervoltage, throttled");
+  assert.equal(alertNames(null), "Flags unavailable");
 });

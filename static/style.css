@@ -73,18 +73,28 @@ h3 .icon { color: var(--soft); width: 15px; height: 15px; }
 .chart-stats dt { font-size: 10px; color: var(--soft); margin-bottom: 9px; }
 .chart-stats dd { margin: 0; font-size: 25px; font-weight: 600; letter-spacing: -.03em; }
 .network-stats dd { display: flex; flex-direction: column; gap: 7px; font-size: 12px; letter-spacing: 0; font-weight: 500; white-space: nowrap; }
+.thermal-card { margin-top: 13px; }
+.thermal-stats dd { font-size: 19px; }
 .download { color: var(--blue); }
 .upload { color: var(--green); }
 .chart-layout { display: grid; grid-template-columns: 65px minmax(0, 1fr); column-gap: 10px; }
-.chart-y-axis { display: flex; flex-direction: column; justify-content: space-between; height: 160px; color: var(--soft); font-size: 10px; line-height: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.thermal-layout { grid-template-columns: 65px minmax(0, 1fr) 60px; }
+.chart-y-axis, .chart-right-axis { display: flex; flex-direction: column; justify-content: space-between; height: 160px; color: var(--soft); font-size: 10px; line-height: 12px; font-variant-numeric: tabular-nums; }
+.chart-y-axis { text-align: right; }
+.chart-right-axis { text-align: left; }
 .chart-plot { height: 160px; position: relative; cursor: crosshair; touch-action: pan-y; }
 .chart { width: 100%; height: 100%; overflow: visible; }
 .chart-grid { stroke: var(--track); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-line { fill: none; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .chart-line.cpu, .chart-line.rx { stroke: var(--blue); }
 .chart-line.tx { stroke: var(--green); stroke-dasharray: 5 3; }
+.chart-line.temperature { stroke: var(--amber); }
+.chart-line.frequency { stroke: var(--blue); }
+.chart-alert { fill: none; stroke: var(--red); stroke-width: 1.5; opacity: .45; vector-effect: non-scaling-stroke; }
 .chart-point.cpu, .chart-point.rx { fill: var(--blue); }
 .chart-point.tx { fill: var(--green); }
+.chart-point.temperature { fill: var(--amber); }
+.chart-point.frequency { fill: var(--blue); }
 .chart-area { fill: #80adff14; }
 .chart-missing { fill: #93a6b90a; stroke: var(--border); stroke-dasharray: 3 4; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-missing-labels, .chart-cursor { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
@@ -102,6 +112,8 @@ h3 .icon { color: var(--soft); width: 15px; height: 15px; }
 .legend-line { display: inline-block; width: 10px; height: 3px; border-radius: 3px; }
 .blue { background: var(--blue); }
 .green { background: var(--green); }
+.amber { background: var(--amber); }
+.red { background: var(--red); }
 .legend-line.dashed { background: repeating-linear-gradient(to right, var(--green) 0 4px, transparent 4px 6px); }
 .storage-grid { margin-top: 13px; }
 .storage-card { padding: 21px; }
@@ -127,7 +139,7 @@ progress.warning::-moz-progress-bar { background: var(--amber); }
 .refresh-button:disabled { opacity: .5; cursor: wait; }
 .refresh-button .icon { width: 14px; height: 14px; }
 .service-table { overflow: hidden; }
-.table-heading, .service-row { display: grid; grid-template-columns: 1fr 85px 130px 20px; gap: 24px; align-items: center; }
+.table-heading, .service-row { display: grid; grid-template-columns: minmax(0, 1fr) 55px 95px 135px 110px 14px; gap: 16px; align-items: center; }
 .table-heading { padding: 14px 22px; border-bottom: 1px solid var(--border); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--soft); background: var(--surface-muted); }
 .service-row { padding: 14px 22px; border-bottom: 1px solid var(--track); text-decoration: none; transition: background .15s; }
 .service-row:last-child { border-bottom: 0; }
@@ -142,6 +154,10 @@ progress.warning::-moz-progress-bar { background: var(--amber); }
 .service-state.failed { color: var(--red); }
 .service-state.inactive, .service-state.activating, .service-state.deactivating { color: var(--amber); }
 .service-state .dot { width: 5px; height: 5px; }
+.service-http, .service-last { font-size: 11px; color: var(--soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.service-http.ok { color: var(--green); }
+.service-http.warning { color: var(--amber); }
+.service-http.error { color: var(--red); }
 .service-open { color: var(--soft); width: 14px; height: 14px; }
 .service-footnote { font-size: 10px; line-height: 1.65; color: var(--soft); margin-top: 12px; }
 .loading-services { font-size: 13px; color: var(--soft); padding: 20px; }
@@ -157,6 +173,8 @@ footer .dot { width: 5px; height: 5px; color: var(--soft); }
   .detail-grid { gap: 10px; grid-template-columns: repeat(6, 1fr); }
   .detail-card { grid-column: span 2; }
   .detail-card:nth-child(n+4) { grid-column: span 3; }
+  .table-heading, .service-row { grid-template-columns: minmax(0, 1fr) 42px 76px 115px 92px 12px; gap: 9px; }
+  .service-http, .service-last { font-size: 10px; }
 }
 @media (max-width: 640px) {
   main { width: calc(100% - 36px); padding-top: 24px; }
@@ -189,6 +207,10 @@ footer .dot { width: 5px; height: 5px; color: var(--soft); }
   .chart-stats > div + div { padding-left: 10px; }
   .chart-stats dd { font-size: clamp(18px, 5.9vw, 23px); }
   .network-stats dd { font-size: clamp(9px, 2.8vw, 11px); }
+  .thermal-stats dd { font-size: clamp(12px, 3.3vw, 17px); }
+  .thermal-layout { grid-template-columns: 44px minmax(0, 1fr) 44px; column-gap: 6px; }
+  .chart-right-axis { font-size: 8px; }
+  .thermal-card .legend { flex-wrap: wrap; }
   .storage-grid { margin-top: 10px; }
   .storage-card { padding: 18px; }
   .detail-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px; }
@@ -197,14 +219,20 @@ footer .dot { width: 5px; height: 5px; color: var(--soft); }
   .services-section { margin-top: 34px; }
   .services-heading h2 { font-size: 21px; }
   .services-heading p { font-size: 11px; }
-  .table-heading, .service-row { grid-template-columns: minmax(0, 1fr) 40px 65px 12px; gap: 8px; padding-left: 14px; padding-right: 14px; }
-  .table-heading { font-size: 8px; }
+  .table-heading { display: none; }
+  .service-row { grid-template-columns: minmax(0, 1fr) auto 12px; gap: 7px 10px; padding-left: 14px; padding-right: 14px; }
   .service-label { gap: 9px; }
   .app-icon { width: 27px; height: 29px; font-size: 8px; }
   .service-label strong { font-size: 11px; }
   .service-label small { font-size: 8px; overflow-wrap: anywhere; }
   .service-port, .service-state { font-size: 9px; }
   .service-state { gap: 4px; }
+  .service-label { grid-column: 1; grid-row: 1; }
+  .service-port { grid-column: 2; grid-row: 1; }
+  .service-open { grid-column: 3; grid-row: 1; }
+  .service-state { grid-column: 1; grid-row: 2; margin-left: 36px; }
+  .service-http { grid-column: 2 / 4; grid-row: 2; text-align: right; font-size: 9px; }
+  .service-last { grid-column: 1 / -1; grid-row: 3; margin-left: 36px; font-size: 9px; }
   .service-footnote { font-size: 9px; }
   footer { flex-direction: column; align-items: flex-start; gap: 8px; font-size: 9px; margin-top: 24px; }
 }

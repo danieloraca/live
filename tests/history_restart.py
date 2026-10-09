@@ -91,9 +91,9 @@ with tempfile.TemporaryDirectory(prefix="live-history-test-") as directory:
             with sqlite3.connect(database) as connection:
                 assert connection.execute("SELECT COUNT(*) FROM samples WHERE timestamp = ?", (pending_timestamp,)).fetchone()[0] == 1
                 old = int(time.time()) - 400 * 86400
-                connection.execute("INSERT INTO samples VALUES (?, 42, 100, 50)", (old,))
+                connection.execute("INSERT INTO samples (timestamp, cpu, rx, tx) VALUES (?, 42, 100, 50)", (old,))
                 day_start = (int(time.time()) // 60 - 120) * 60
-                connection.executemany("INSERT INTO samples VALUES (?, ?, ?, ?)", [(day_start, 20, 100, None), (day_start + 5, 40, 300, None)])
+                connection.executemany("INSERT INTO samples (timestamp, cpu, rx, tx) VALUES (?, ?, ?, ?)", [(day_start, 20, 100, None), (day_start + 5, 40, 300, None)])
 
             with server(database, log) as get:
                 points = get("/api/history")["points"]
@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory(prefix="live-history-test-") as directory:
                 day = get("/api/history?minutes=1440")
                 assert day["resolution_seconds"] == 60
                 bucket = next(p for p in day["points"] if p["timestamp"] == day_start + 5)
-                assert bucket == {"timestamp": day_start + 5, "cpu": 30, "rx": 200, "tx": None}
+                assert bucket == {"timestamp": day_start + 5, "cpu": 30, "rx": 200, "tx": None, "temperature": None, "frequency": None, "throttled": None}
                 assert day["summary"]["cpu"]["peak"] >= 40
                 assert day["summary"]["cpu"]["samples"] >= 2
                 assert get("/api/status")["history"]["state"] == "ok"

@@ -211,6 +211,9 @@ impl Snapshot {
             cpu: self.cpu,
             rx: self.rx,
             tx: self.tx,
+            temperature: self.temperature,
+            frequency: self.frequency,
+            throttled: self.throttled,
         }
     }
 
@@ -274,7 +277,23 @@ pub struct Collector {
     previous_network: Counters,
     previous_at: Instant,
     disk: Option<Disk>,
-    throttled: Option<u32>,
+}
+
+fn firmware_temperature(output: &str) -> Option<f64> {
+    output
+        .strip_prefix("temp=")?
+        .split_once("'")?
+        .0
+        .parse()
+        .ok()
+}
+
+fn firmware_clock(output: &str) -> Option<f64> {
+    Some(output.split_once('=')?.1.parse::<f64>().ok()? / 1_000_000.0)
+}
+
+fn firmware_flags(output: &str) -> Option<u32> {
+    u32::from_str_radix(output.strip_prefix("throttled=0x")?, 16).ok()
 }
 
 impl Collector {
@@ -312,7 +331,6 @@ impl Collector {
             previous_network: BTreeMap::new(),
             previous_at: Instant::now(),
             disk: None,
-            throttled: None,
         }
     }
 
@@ -320,8 +338,6 @@ impl Collector {
         if slow {
             // POSIX 1 KiB output works on Linux and on the local development machine.
             self.disk = command("df", &["-Pk", "/"]).and_then(|s| Disk::parse(&s));
-            self.throttled = command("vcgencmd", &["get_throttled"])
-                .and_then(|s| u32::from_str_radix(s.strip_prefix("throttled=0x")?, 16).ok());
         }
         let at = Instant::now();
         let stat = read("/proc/stat");
@@ -365,9 +381,17 @@ impl Collector {
                 })
                 .unwrap_or(0),
             memory: read("/proc/meminfo").and_then(|s| Memory::parse(&s)),
-            temperature: scalar("/sys/class/thermal/thermal_zone0/temp").map(|n| n / 1000.0),
-            frequency: scalar("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
-                .map(|n| n / 1000.0),
+            temperature: command("vcgencmd", &["measure_temp"])
+                .as_deref()
+                .and_then(firmware_temperature)
+                .or_else(|| scalar("/sys/class/thermal/thermal_zone0/temp").map(|n| n / 1000.0)),
+            frequency: command("vcgencmd", &["measure_clock", "arm"])
+                .as_deref()
+                .and_then(firmware_clock)
+                .or_else(|| {
+                    scalar("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+                        .map(|n| n / 1000.0)
+                }),
             disk: self.disk,
             load,
             processes: std::fs::read_dir("/proc").ok().map(|dirs| {
@@ -385,7 +409,9 @@ impl Collector {
             sent: (!counters.is_empty()).then(|| counters.values().map(|v| v.1).sum()),
             rx: rate.map(|v| v.0),
             tx: rate.map(|v| v.1),
-            throttled: self.throttled,
+            throttled: command("vcgencmd", &["get_throttled"])
+                .as_deref()
+                .and_then(firmware_flags),
         };
         self.previous_cpu = cpu;
         self.previous_network = counters;
@@ -437,5 +463,12 @@ mod tests {
         assert_eq!(disk.total, 1024000);
         assert_eq!(disk.available, 665600);
         assert!(Disk::parse("unavailable").is_none());
+    }
+
+    #[test]
+    fn parses_firmware_readings() {
+        assert_eq!(firmware_temperature("temp=51.3'C"), Some(51.3));
+        assert_eq!(firmware_clock("frequency(48)=1500000000"), Some(1500.0));
+        assert_eq!(firmware_flags("throttled=0x50005"), Some(0x50005));
     }
 }
