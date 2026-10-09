@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summarize, segments, missingSpans, nearestPoint, networkScale, networkTick, temperatureScale, rate, frequency, alertNames } from "../static/charts.mjs";
+import { summarize, segments, missingSpans, nearestPoint, networkScale, networkTick, temperatureScale, frequencyScale, rate, frequency, alertNames } from "../static/charts.mjs";
 
 test("summaries include zero and exclude missing samples", () => {
   assert.deepEqual(summarize([{ cpu: 0 }, { cpu: 9 }, { cpu: null }, { cpu: NaN }], "cpu"), { average: 4.5, peak: 9, samples: 2 });
@@ -49,6 +49,15 @@ test("temperature scale follows observed readings without amplifying sensor nois
   const stable = temperatureScale([{ temperature: 52.4 }, { temperature: 52.5 }]);
   assert.ok(stable.min < 52.4 && stable.max > 52.5);
   assert.ok(stable.max - stable.min >= 8);
+});
+
+test("CPU clock scale shows drops while retaining a useful minimum span", () => {
+  assert.equal(frequencyScale([{ frequency: null }]), null);
+  assert.deepEqual(frequencyScale([{ frequency: 1800 }, { frequency: 2400 }]), { min: 1700, max: 2500 });
+  const steady = frequencyScale([{ frequency: 2400 }, { frequency: 2410 }]);
+  assert.ok(steady.min < 2400 && steady.max > 2410);
+  assert.ok(steady.max - steady.min >= 500);
+  assert.deepEqual(frequencyScale([{ frequency: 100 }]), { min: 0, max: 500 });
 });
 
 test("thermal labels separate active alerts from latched warnings", () => {

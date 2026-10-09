@@ -110,13 +110,14 @@ the tab is visible. Current readings still refresh every five seconds.
 The charts show labeled scales, local timestamps, and period summaries.
 CPU stays on a fixed 0–100% scale; the network scale adapts to traffic and labels
 its units. Temperature and ARM clock have separate charts with the same selected
-time range. Temperature uses a labeled range around recorded readings with a
-minimum span of 8°C; red markers show samples with active throttle, temperature, or
-undervoltage flags. The firmware's latched "occurred since boot" bits are retained
-but do not create event markers with an invented timestamp. Period summaries use original
-samples, excluding missing readings, so peaks remain accurate even when the
-plotted line is averaged. Hover or tap to inspect a reading, or focus the chart
-and use arrow keys, Home, and End. Escape clears the selection. Averaged readings
+time range. Both use labeled ranges around recorded readings, with minimum spans
+of 8°C and 500 MHz respectively. Red markers show samples with active throttle,
+temperature, or undervoltage flags. The firmware's latched "occurred since boot"
+bits are retained but do not create event markers with an invented timestamp.
+Period summaries use original samples, excluding missing readings, so peaks
+remain accurate even when the plotted line is averaged. Hover or tap to inspect
+a reading, or focus the chart and use arrow keys, Home, and End. Escape clears
+the selection. Averaged readings
 identify their time bucket. Unrecorded periods are marked as missing rather than
 drawn as zero.
 
