@@ -41,6 +41,20 @@ export function networkTick(value, ceiling) {
   return Number(amount.toFixed(2)) + " " + units[unit] + "/s";
 }
 
+export function temperatureScale(points) {
+  const values = points.map((p) => p.temperature).filter(known);
+  if (!values.length) return null;
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const span = Math.max(8, (high - low) * 1.25);
+  const step = span <= 12 ? 2 : span <= 30 ? 5 : 10;
+  const center = (low + high) / 2;
+  return {
+    min: Math.floor((center - span / 2) / step) * step,
+    max: Math.ceil((center + span / 2) / step) * step,
+  };
+}
+
 export function segments(points, key, resolution) {
   const result = [];
   let current = [];
@@ -170,20 +184,34 @@ export class HistoryChart {
     this.end = end;
     this.resolution = resolution;
     this.loading = loading;
+    this.floor = 0;
+    this.temperatureRange = this.id === "temperature" ? temperatureScale(points) : null;
     if (this.id === "frequency") {
       const peak = Math.max(0, ...points.map((p) => p.frequency).filter(known));
       this.ceiling = Math.max(1000, Math.ceil(peak * 1.1 / 500) * 500);
-    } else this.ceiling = this.id === "cpu" || this.id === "temperature" ? 100 : networkScale(points);
+    } else if (this.id === "temperature") {
+      this.floor = this.temperatureRange?.min ?? 0;
+      this.ceiling = this.temperatureRange?.max ?? 100;
+    } else this.ceiling = this.id === "cpu" ? 100 : networkScale(points);
     this.x = (timestamp) => (timestamp - start) / (end - start) * 500;
-    this.y = (value) => 154 - Math.max(0, Math.min(value / this.ceiling, 1)) * 148;
+    this.y = (value) => 154 - Math.max(0, Math.min((value - this.floor) / (this.ceiling - this.floor), 1)) * 148;
     this.svg.replaceChildren();
     this.yAxis.replaceChildren();
     this.labels.replaceChildren();
-    for (const fraction of [1, .75, .5, .25, 0]) {
+    if (this.id === "temperature") {
+      const gradient = svgElement("linearGradient", { id: "temperature-fill", x1: "0", y1: "0", x2: "0", y2: "1" });
+      gradient.append(svgElement("stop", { offset: "0%", "stop-color": "#ffd36a", "stop-opacity": ".20" }));
+      gradient.append(svgElement("stop", { offset: "100%", "stop-color": "#ffd36a", "stop-opacity": "0" }));
+      const defs = svgElement("defs", {});
+      defs.append(gradient);
+      this.svg.append(defs);
+    }
+    for (const fraction of this.id === "temperature" ? [1, .5, 0] : [1, .75, .5, .25, 0]) {
+      const value = this.floor + (this.ceiling - this.floor) * fraction;
       const label = document.createElement("span");
-      label.textContent = this.id === "cpu" ? fraction * 100 + "%" : this.id === "temperature" ? fraction * 100 + "°C" : this.id === "frequency" ? frequency(this.ceiling * fraction) : networkTick(this.ceiling * fraction, this.ceiling);
+      label.textContent = this.id === "cpu" ? fraction * 100 + "%" : this.id === "temperature" ? this.temperatureRange ? Number(value.toFixed(1)) + "°C" : "—" : this.id === "frequency" ? frequency(value) : networkTick(value, this.ceiling);
       this.yAxis.append(label);
-      const y = this.y(this.ceiling * fraction);
+      const y = this.y(value);
       this.svg.append(svgElement("line", { x1: 0, y1: y, x2: 500, y2: y, class: "chart-grid" }));
     }
     for (const span of missingSpans(points, this.keys, start, end, resolution)) {
@@ -213,8 +241,14 @@ export class HistoryChart {
           continue;
         }
         const d = segment.map((p, i) => (i ? "L" : "M") + this.x(p.timestamp).toFixed(2) + "," + this.y(p[key], key).toFixed(2)).join(" ");
-        if (key === "cpu") this.svg.append(svgElement("path", { d: d + ` L${this.x(segment.at(-1).timestamp)},154 L${this.x(segment[0].timestamp)},154 Z`, class: "chart-area" }));
+        if (key === "cpu" || key === "temperature") this.svg.append(svgElement("path", { d: d + ` L${this.x(segment.at(-1).timestamp)},154 L${this.x(segment[0].timestamp)},154 Z`, class: "chart-area " + key }));
         this.svg.append(svgElement("path", { d, class: "chart-line " + key }));
+      }
+    }
+    if (this.id === "temperature") {
+      const last = points.findLast((point) => known(point.temperature));
+      if (last && end - last.timestamp <= Math.max(15, resolution * 1.5)) {
+        this.svg.append(svgElement("circle", { cx: this.x(last.timestamp), cy: this.y(last.temperature), r: 3.5, class: "chart-latest-temperature" }));
       }
     }
     this.timeAxis.replaceChildren();

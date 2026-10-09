@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summarize, segments, missingSpans, nearestPoint, networkScale, networkTick, rate, frequency, alertNames } from "../static/charts.mjs";
+import { summarize, segments, missingSpans, nearestPoint, networkScale, networkTick, temperatureScale, rate, frequency, alertNames } from "../static/charts.mjs";
 
 test("summaries include zero and exclude missing samples", () => {
   assert.deepEqual(summarize([{ cpu: 0 }, { cpu: 9 }, { cpu: null }, { cpu: NaN }], "cpu"), { average: 4.5, peak: 9, samples: 2 });
@@ -41,6 +41,14 @@ test("network scale contains both directions and uses consistent axis units", ()
   const ceiling = networkScale([{ rx: 100, tx: 3000 }, { rx: null, tx: 0 }]);
   assert.equal(ceiling, 4096);
   assert.deepEqual([1, .75, .5, .25, 0].map((fraction) => networkTick(ceiling * fraction, ceiling)), ["4 KiB/s", "3 KiB/s", "2 KiB/s", "1 KiB/s", "0 KiB/s"]);
+});
+
+test("temperature scale follows observed readings without amplifying sensor noise", () => {
+  assert.equal(temperatureScale([{ temperature: null }]), null);
+  assert.deepEqual(temperatureScale([{ temperature: 52 }, { temperature: 60 }]), { min: 50, max: 62 });
+  const stable = temperatureScale([{ temperature: 52.4 }, { temperature: 52.5 }]);
+  assert.ok(stable.min < 52.4 && stable.max > 52.5);
+  assert.ok(stable.max - stable.min >= 8);
 });
 
 test("thermal labels separate active alerts from latched warnings", () => {
