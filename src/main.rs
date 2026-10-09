@@ -1,3 +1,4 @@
+mod cli;
 mod history;
 mod metrics;
 mod services;
@@ -18,6 +19,13 @@ struct State {
 }
 
 fn main() -> Result<(), history::Error> {
+    match cli::command(std::env::args().skip(1))? {
+        cli::Command::Serve => serve(),
+        command => cli::run(command),
+    }
+}
+
+fn serve() -> Result<(), history::Error> {
     let address = std::env::var("LIVE_ADDRESS").unwrap_or_else(|_| "0.0.0.0:9999".into());
     let listener = TcpListener::bind(&address)?;
     listener.set_nonblocking(true)?;

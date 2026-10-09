@@ -16,7 +16,7 @@ The dashboard includes:
 
 ## Run
 
-Requires Rust 1.87 or later and a C compiler (for bundled SQLite).
+Requires Rust 1.88 or later and a C compiler (for bundled SQLite).
 No separate database server or SQLite package is required. On the Pi:
 
 ~~~sh
@@ -30,6 +30,32 @@ from the local network. To preview on a different local port:
 ~~~sh
 LIVE_ADDRESS=127.0.0.1:9998 cargo run
 ~~~
+
+## Terminal dashboard
+
+With the web service running, use the same binary to read its cached data:
+
+~~~sh
+./target/release/live status
+./target/release/live watch
+~~~
+
+`status` prints a snapshot suited to SSH sessions and scripts. `watch` opens a
+Ratatui dashboard with current vitals, 15-minute trends, service health, and
+history warnings. Press `q` or Escape to quit, `r` to refresh, and the arrow keys
+or `j`/`k` to browse services. The terminal view refreshes status every five
+seconds and trends every 30 seconds. It needs an interactive terminal; `status`
+does not.
+
+Both commands connect to `127.0.0.1:9999` by default. If the service listens
+elsewhere, pass `--address HOST:PORT` or set `LIVE_CLI_ADDRESS`. For example:
+
+~~~sh
+./target/release/live watch --address 127.0.0.1:9998
+~~~
+
+The CLI does not start a second sampler or write another history database. Run
+`live --help` for command usage.
 
 On macOS, Linux-only readings are explicitly unavailable. They are never
 replaced with sample data. Disk usage can still be read locally.
