@@ -224,7 +224,8 @@ async function refresh() {
     const data = await request("/api/status");
     if (!data.metrics || !Array.isArray(data.services) || !known(data.metrics.timestamp)) throw new Error("Invalid status");
     const requestedMinutes = minutes;
-    if (needsHistory || Date.now() - lastHistoryLoad >= 30000) {
+    const historyInterval = minutes === 43200 ? 300000 : minutes === 10080 ? 120000 : minutes === 1440 ? 60000 : 30000;
+    if (needsHistory || Date.now() - lastHistoryLoad >= historyInterval) {
       try {
         const collected = await request("/api/history?minutes=" + requestedMinutes);
         if (!Array.isArray(collected.points) || !known(collected.resolution_seconds)) throw new Error("Invalid history");

@@ -37,7 +37,8 @@ replaced with sample data. Disk usage can still be read locally.
 ## Data and refresh behavior
 
 Hardware samples are collected every five seconds in one background sampler.
-Service states, HTTP responses, and disk space are checked every 30 seconds.
+Service states and HTTP responses are checked once a minute; disk space is
+checked every 30 seconds.
 Pi firmware temperature, actual ARM clock, and throttle flags are sampled every
 five seconds when `vcgencmd` is available; `/sys` provides temperature and
 clock fallbacks.
@@ -75,8 +76,10 @@ The 15-minute and one-hour charts show original samples. Longer chart views use
 1-minute, 10-minute, and 30-minute averages respectively to keep responses small;
 the original rows remain in SQLite. Missing periods are left empty, although
 averaged views cannot show gaps shorter than their bucket size. Hidden tabs
-pause polling and reload saved history when reopened. Longer views reload every
-30 seconds while current readings still refresh every five seconds.
+pause polling and reload saved history when reopened. The 15-minute and
+one-hour charts reload every 30 seconds, the 24-hour chart every minute, the
+7-day chart every two minutes, and the 30-day chart every five minutes while
+the tab is visible. Current readings still refresh every five seconds.
 
 The charts show labeled scales, local timestamps, and period summaries.
 CPU stays on a fixed 0–100% scale; the network scale adapts to traffic and labels

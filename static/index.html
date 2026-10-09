@@ -128,7 +128,7 @@
         <div class="table-heading" aria-hidden="true"><span>Application</span><span>Port</span><span>Service state</span><span>HTTP check</span><span>Last reply</span><span></span></div>
         <div id="service-list"><p class="loading-services">Checking your services…</p></div>
       </div>
-      <p class="service-footnote">Service states come from systemd. HTTP checks request each app’s home page on localhost every 30 seconds. Any 2xx–4xx response confirms the app replied; 5xx or no response needs attention. Some API-only apps return 404 at the root path. Last reply resets when this dashboard restarts.</p>
+      <p class="service-footnote">Service states come from systemd. HTTP checks request each app’s home page on localhost once a minute. Any 2xx–4xx response confirms the app replied; 5xx or no response needs attention. Some API-only apps return 404 at the root path. Last reply resets when this dashboard restarts.</p>
     </section>
 
     <footer><span><span class="dot"></span> A small Rust process. A live view of your Pi.</span><span>Metrics every 5s <span class="footer-separator">·</span> <span id="history-storage">Checking saved history…</span></span></footer>

@@ -89,7 +89,7 @@ fn sample(
     let mut cycle = 0u64;
     while !stopping.load(Ordering::Relaxed) {
         let started = Instant::now();
-        if cycle.is_multiple_of(6) {
+        if cycle.is_multiple_of(12) {
             service_data = service_collector.collect();
             services_updated_at = util::now();
         }
