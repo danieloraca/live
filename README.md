@@ -180,18 +180,19 @@ python3 tests/history_restart.py
 The unit in deploy/live.service runs
 /home/danutz/Development/live/target/release/live as danutz.
 
-Once the deployment script is available in the Pi checkout, run it as the
-normal `danutz` user (not with `sudo`):
+Once the Makefile is available in the Pi checkout, deploy as the normal
+`danutz` user (not with `sudo`):
 
 ~~~sh
 cd /home/danutz/Development/live
-./deploy/update-pi.sh
+make deploy
 ~~~
 
-For the first deployment of this script, run `git pull --ff-only` manually to
-get it onto the Pi. After that, the script pulls with fast-forward only, runs
-the Rust tests, rebuilds the release binary, restarts `live.service`, and waits
-for the status API to respond. The static HTML, CSS, and JavaScript are embedded
-at compile time, so rebuilding is required whenever they change. Optional
-vcgencmd permissions only affect firmware warnings; no elevated privileges are
+For the first deployment of the Makefile, run `git pull --ff-only` manually to
+get it onto the Pi. After that, `make deploy` runs `deploy/update-pi.sh`. It
+pulls with fast-forward only, runs the Rust tests, rebuilds the release binary,
+restarts `live.service`, and waits for the status API to respond. The static
+HTML, CSS, and JavaScript are embedded at compile time, so rebuilding is
+required whenever they change. Optional vcgencmd permissions only affect
+firmware warnings; no elevated privileges are
 required by the web server.
