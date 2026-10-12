@@ -111,9 +111,11 @@ The charts show labeled scales, local timestamps, and period summaries.
 CPU stays on a fixed 0–100% scale; the network scale adapts to traffic and labels
 its units. Temperature and ARM clock have separate charts with the same selected
 time range. Both use labeled ranges around recorded readings, with minimum spans
-of 8°C and 500 MHz respectively. Red markers show samples with active throttle,
-temperature, or undervoltage flags. The firmware's latched "occurred since boot"
-bits are retained but do not create event markers with an invented timestamp.
+of 8°C and 500 MHz respectively. The CPU clock trace steps between sampled
+frequencies to make clock changes easier to spot. Red markers show samples with
+active throttle, temperature, or undervoltage flags. The firmware's latched
+"occurred since boot" bits are retained but do not create event markers with an
+invented timestamp.
 Period summaries use original samples, excluding missing readings, so peaks
 remain accurate even when the plotted line is averaged. Hover or tap to inspect
 a reading, or focus the chart and use arrow keys, Home, and End. Escape clears

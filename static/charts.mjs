@@ -216,10 +216,16 @@ export class HistoryChart {
     if (this.hardware) {
       const color = this.id === "temperature" ? "#ffd36a" : "#80adff";
       const gradient = svgElement("linearGradient", { id: this.id + "-fill", x1: "0", y1: "0", x2: "0", y2: "1" });
-      gradient.append(svgElement("stop", { offset: "0%", "stop-color": color, "stop-opacity": ".20" }));
+      gradient.append(svgElement("stop", { offset: "0%", "stop-color": this.id === "frequency" ? "#6de4dc" : color, "stop-opacity": this.id === "frequency" ? ".30" : ".20" }));
       gradient.append(svgElement("stop", { offset: "100%", "stop-color": color, "stop-opacity": "0" }));
       const defs = svgElement("defs", {});
       defs.append(gradient);
+      if (this.id === "frequency") {
+        const stroke = svgElement("linearGradient", { id: "frequency-stroke", x1: "0", y1: "0", x2: "0", y2: "1" });
+        stroke.append(svgElement("stop", { offset: "0%", "stop-color": "#6de4dc" }));
+        stroke.append(svgElement("stop", { offset: "100%", "stop-color": "#80adff" }));
+        defs.append(stroke);
+      }
       this.svg.append(defs);
     }
     for (const fraction of this.hardware ? [1, .5, 0] : [1, .75, .5, .25, 0]) {
@@ -256,7 +262,11 @@ export class HistoryChart {
           this.svg.append(svgElement("circle", { cx: this.x(segment[0].timestamp), cy: this.y(segment[0][key], key), r: 2, class: "chart-point " + key }));
           continue;
         }
-        const d = segment.map((p, i) => (i ? "L" : "M") + this.x(p.timestamp).toFixed(2) + "," + this.y(p[key], key).toFixed(2)).join(" ");
+        const d = segment.map((p, i) => {
+          const x = this.x(p.timestamp).toFixed(2);
+          const y = this.y(p[key], key).toFixed(2);
+          return i && key === "frequency" ? `H${x} V${y}` : (i ? "L" : "M") + x + "," + y;
+        }).join(" ");
         if (key === "cpu" || this.hardware) this.svg.append(svgElement("path", { d: d + ` L${this.x(segment.at(-1).timestamp)},154 L${this.x(segment[0].timestamp)},154 Z`, class: "chart-area " + key }));
         this.svg.append(svgElement("path", { d, class: "chart-line " + key }));
       }
@@ -265,6 +275,7 @@ export class HistoryChart {
       const key = this.id;
       const last = points.findLast((point) => known(point[key]));
       if (last && end - last.timestamp <= Math.max(15, resolution * 1.5)) {
+        if (key === "frequency") this.svg.append(svgElement("circle", { cx: this.x(last.timestamp), cy: this.y(last[key]), r: 8, class: "chart-latest-halo" }));
         this.svg.append(svgElement("circle", { cx: this.x(last.timestamp), cy: this.y(last[key]), r: 3.5, class: "chart-latest " + key }));
       }
     }

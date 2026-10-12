@@ -76,6 +76,8 @@ h3 .icon { color: var(--soft); width: 15px; height: 15px; }
 .thermal-grid { margin-top: 13px; }
 .thermal-grid .legend { flex-wrap: wrap; }
 .clock-chart-card .chart-stats dd { font-size: clamp(17px, 2.1vw, 23px); white-space: nowrap; }
+.clock-chart-card { background: radial-gradient(ellipse at 85% 14%, #31557a33, transparent 60%), var(--surface); }
+.clock-chart-card h3 .icon, .clock-chart-card .chart-stats > div:first-child dd { color: #83ddd9; }
 .download { color: var(--blue); }
 .upload { color: var(--green); }
 .chart-layout { display: grid; grid-template-columns: 65px minmax(0, 1fr); column-gap: 10px; }
@@ -88,18 +90,19 @@ h3 .icon { color: var(--soft); width: 15px; height: 15px; }
 .chart-line.cpu, .chart-line.rx { stroke: var(--blue); }
 .chart-line.tx { stroke: var(--green); stroke-dasharray: 5 3; }
 .chart-line.temperature { stroke: var(--amber); }
-.chart-line.frequency { stroke: var(--blue); }
+.chart-line.frequency { stroke: url(#frequency-stroke); stroke-width: 2.4; filter: drop-shadow(0 0 4px #6de4dc80); }
 .chart-alert { fill: none; stroke: var(--red); stroke-width: 1.5; opacity: .45; vector-effect: non-scaling-stroke; }
 .chart-point.cpu, .chart-point.rx { fill: var(--blue); }
 .chart-point.tx { fill: var(--green); }
 .chart-point.temperature { fill: var(--amber); }
-.chart-point.frequency { fill: var(--blue); }
+.chart-point.frequency { fill: #83ddd9; }
 .chart-area { fill: #80adff14; }
 .chart-area.temperature { fill: url(#temperature-fill); }
 .chart-area.frequency { fill: url(#frequency-fill); }
 .chart-latest { stroke: var(--surface); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .chart-latest.temperature { fill: var(--amber); }
-.chart-latest.frequency { fill: var(--blue); }
+.chart-latest.frequency { fill: #83ddd9; }
+.chart-latest-halo { fill: #6de4dc1c; stroke: #83ddd985; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-missing { fill: #93a6b90a; stroke: var(--border); stroke-dasharray: 3 4; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .chart-missing-labels, .chart-cursor { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .chart-missing-note { position: absolute; top: 50%; text-align: center; transform: translateY(-50%); color: var(--soft); font-size: 10px; line-height: 1.5; padding: 0 3px; }
@@ -115,6 +118,7 @@ h3 .icon { color: var(--soft); width: 15px; height: 15px; }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .legend-line { display: inline-block; width: 10px; height: 3px; border-radius: 3px; }
 .blue { background: var(--blue); }
+.legend-line.clock { background: linear-gradient(90deg, #80adff, #6de4dc); }
 .green { background: var(--green); }
 .amber { background: var(--amber); }
 .red { background: var(--red); }
