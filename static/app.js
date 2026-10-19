@@ -77,6 +77,7 @@ function renderServices(services) {
     const link = document.createElement("a");
     link.className = "service-row";
     const url = new URL("/", window.location.href);
+    if (service.unit !== "live.service") url.protocol = "http:";
     url.port = String(service.port);
     link.href = url.href;
     link.target = "_blank";
