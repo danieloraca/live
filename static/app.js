@@ -71,13 +71,13 @@ function renderServices(services) {
     "elite.service": "EL",
     "sym_notes.service": "SN",
     "jirpi.service": "JP",
+    "token-grove.service": "TG",
     "live.service": "PI",
   };
   const rows = services.map((service) => {
     const link = document.createElement("a");
     link.className = "service-row";
     const url = new URL("/", window.location.href);
-    if (service.unit !== "live.service") url.protocol = "http:";
     url.port = String(service.port);
     link.href = url.href;
     link.target = "_blank";

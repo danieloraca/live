@@ -25,7 +25,10 @@ cargo build --release
 ~~~
 
 The default address is http://0.0.0.0:9999. Visit http://192.168.0.25:9999
-from the local network. To preview on a different local port:
+from the local network, or http://100.106.171.95:9999 from a device connected
+to the same Tailscale network. Service links use the address and protocol used
+to open the dashboard, with each service's own port. To preview on a different
+local port:
 
 ~~~sh
 LIVE_ADDRESS=127.0.0.1:9998 cargo run
@@ -196,48 +199,3 @@ HTML, CSS, and JavaScript are embedded at compile time, so rebuilding is
 required whenever they change. Optional vcgencmd permissions only affect
 firmware warnings; no elevated privileges are
 required by the web server.
-
-## HTTPS on MyPi5
-
-The configured Pi deployment is available over Tailscale at
-[https://i0.tail52d63a.ts.net:9999](https://i0.tail52d63a.ts.net:9999).
-Caddy serves HTTPS on the Pi's Tailscale IPv4 and IPv6 addresses and forwards
-requests to Live over loopback. The systemd override at
-`/etc/systemd/system/live.service.d/https.conf` contains:
-
-~~~ini
-[Service]
-Environment=LIVE_ADDRESS=127.0.0.1:9999
-~~~
-
-The following site is added to `/etc/caddy/Caddyfile`, alongside the existing
-SymNotes site on port 443 and its `auto_https disable_redirects` global option:
-
-~~~caddyfile
-https://i0.tail52d63a.ts.net:9999 {
-    bind 100.106.171.95 [fd7a:115c:a1e0::563a:ab60]
-    reverse_proxy 127.0.0.1:9999
-}
-~~~
-
-Caddy obtains the hostname's certificate through the existing Tailscale
-integration. Its override at
-`/etc/systemd/system/caddy.service.d/live-https.conf` orders startup after
-Tailscale and Live and retries if the Tailscale addresses are not ready:
-
-~~~ini
-[Unit]
-Wants=tailscaled.service
-After=tailscaled.service live.service
-StartLimitIntervalSec=0
-
-[Service]
-Restart=on-failure
-RestartSec=5s
-~~~
-
-The terminal dashboard and deployment health checks still use
-`http://127.0.0.1:9999`; remote access uses the HTTPS URL above. Direct HTTP on
-the LAN or Tailscale IP at port 9999 is replaced by this setup. Service links
-keep HTTP for the other applications on their existing ports; Live's own link
-uses the dashboard's current protocol.

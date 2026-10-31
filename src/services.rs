@@ -16,6 +16,7 @@ const SERVICES: &[(&str, &str, u16, &str)] = &[
     ("elite.service", "Elite", 3141, "/"),
     ("sym_notes.service", "Sym Notes", 3444, "/"),
     ("jirpi.service", "JiraPi", 5644, "/healthz"),
+    ("token-grove.service", "Token Grove", 9988, "/"),
     ("live.service", "Live Status", 9999, "/"),
 ];
 
@@ -52,8 +53,13 @@ fn ports(output: &str, pid: u32) -> BTreeSet<u16> {
         .collect()
 }
 
-fn probe_address(sockets: &str, port: u16) -> SocketAddr {
-    for line in sockets.lines() {
+fn probe_address(sockets: &str, port: u16, pid: u32) -> SocketAddr {
+    let pid_pattern = format!("pid={pid},");
+    let has_process_sockets = pid != 0 && sockets.lines().any(|line| line.contains(&pid_pattern));
+    for line in sockets
+        .lines()
+        .filter(|line| !has_process_sockets || line.contains(&pid_pattern))
+    {
         let fields = line.split_whitespace().collect::<Vec<_>>();
         let address_index = if fields.first() == Some(&"tcp") { 4 } else { 3 };
         let Some((host, listener_port)) =
@@ -166,10 +172,16 @@ impl Collector {
                 } else {
                     detected.first().copied().unwrap_or(*fallback)
                 };
-                (*unit, *name, state, probe_address(&sockets, port), *path)
+                (
+                    *unit,
+                    *name,
+                    state,
+                    probe_address(&sockets, port, pid),
+                    *path,
+                )
             })
             .collect::<Vec<_>>();
-        // The ten local checks run together so one slow app cannot stall sampling.
+        // Local checks run together so one slow app cannot stall sampling.
         let probes = thread::scope(|scope| {
             entries
                 .iter()
@@ -238,14 +250,30 @@ mod tests {
         let sockets =
             "LISTEN 0 128 0.0.0.0:9999 0.0.0.0:*\nLISTEN 0 128 192.168.0.25:5644 0.0.0.0:*";
         assert_eq!(
-            probe_address(sockets, 5644),
+            probe_address(sockets, 5644, 0),
             "192.168.0.25:5644".parse().unwrap()
         );
         assert_eq!(
-            probe_address(sockets, 9999),
+            probe_address(sockets, 9999, 0),
             "127.0.0.1:9999".parse().unwrap()
         );
-        assert_eq!(probe_address("", 3444), "127.0.0.1:3444".parse().unwrap());
+        assert_eq!(
+            probe_address("", 3444, 0),
+            "127.0.0.1:3444".parse().unwrap()
+        );
+    }
+
+    #[test]
+    fn probes_its_own_listener_when_a_proxy_shares_the_port() {
+        let sockets = "LISTEN 0 4096 100.106.171.95:9999 0.0.0.0:*\nLISTEN 0 128 127.0.0.1:9999 0.0.0.0:* users:((\"live\",pid=42,fd=3))";
+        assert_eq!(
+            probe_address(sockets, 9999, 42),
+            "127.0.0.1:9999".parse().unwrap()
+        );
+        assert_eq!(
+            probe_address(sockets, 9999, 142),
+            "100.106.171.95:9999".parse().unwrap()
+        );
     }
 
     #[test]
