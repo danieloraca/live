@@ -170,15 +170,35 @@ and [Raspberry Pi firmware status](https://www.raspberrypi.com/documentation/com
 ## Header phase indicator
 
 The yin-yang in the top-right header displays two independent phases. Yin glows
-mint and yang glows warm white when on; off phases have no glow. Until the
-external data service is connected, both remain neutral with an “awaiting data”
-description available on hover and to screen readers.
+mint and yang glows warm white when on; off phases have no glow. The source is
+the systemd journal for `comm.service`.
 
-The browser accepts an optional `phases` object on `/api/status`, for example
+Every five seconds, the sampler reads each phase's latest matching journal
+message independently. Unrelated messages are ignored. The latest retained
+event restores each phase after a
+dashboard restart, including events from earlier boots if the journal retains
+them. A phase keeps its state until its next event; an old `in` does not expire.
+The browser also refreshes every five seconds, so a change normally appears
+within about ten seconds; shorter transitions can fall between samples.
+
+The backend supplies a `phases` object on `/api/status`, for example
 `"phases": {"yin": true, "yang": false}`. Only boolean values mean on or off;
 missing, null, or invalid values mean unknown. A lost or delayed dashboard
-connection clears the indicator to unknown. The backend does not yet supply
-these values; the external service integration will be added separately.
+connection clears the indicator to unknown. No matching event, an unreadable
+journal, or a failed/timed-out query leaves that phase neutral with an
+“awaiting data” description on hover and for screen readers.
+
+The service user (`danutz` in `deploy/live.service`) must already have read
+access to the `comm` system journal. To check as that user, run:
+
+~~~sh
+journalctl -u comm.service --no-pager --all -n 10 -o cat
+~~~
+
+The dashboard never invokes sudo or changes journal permissions. Queries use
+[journalctl's message filter](https://www.freedesktop.org/software/systemd/man/latest/journalctl.html#-g),
+request only the newest matching event for each phase, and have a two-second
+timeout each. There is no per-browser journal process or separate phase database.
 
 ## Verification
 

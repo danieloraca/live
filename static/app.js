@@ -36,7 +36,7 @@ function setHealth(label, level = "") {
   $("health").className = "health-pill" + (level ? " " + level : "");
 }
 
-// The future service adapter can supply optional boolean phases on /api/status.
+// The comm journal supplies independent boolean phases on /api/status.
 // Missing or invalid readings stay unknown rather than being mistaken for off.
 function renderPhases(phases) {
   const labels = [];

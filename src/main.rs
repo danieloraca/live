@@ -1,6 +1,7 @@
 mod cli;
 mod history;
 mod metrics;
+mod phases;
 mod services;
 mod util;
 
@@ -102,6 +103,7 @@ fn sample(
             services_updated_at = util::now();
         }
         let snapshot = collector.collect(cycle.is_multiple_of(6));
+        let phase_data = phases::collect();
         let history_status = {
             let mut history = history.lock().unwrap();
             history.record(snapshot.point());
@@ -113,6 +115,7 @@ fn sample(
             ("services", service_data.clone()),
             ("services_updated_at", services_updated_at.to_string()),
             ("history", history_status),
+            ("phases", phase_data),
         ]);
         state.write().unwrap().status = status;
         cycle = cycle.wrapping_add(1);
