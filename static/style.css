@@ -38,8 +38,8 @@ main { width: min(1120px, calc(100% - 96px)); margin: 0 auto; padding: 43px 0 26
 .phase-yin .phase-eye { fill: #b4c2d0; stroke: none; }
 .phase-yang .phase-eye { fill: #202e3b; stroke: none; }
 .phase[data-state="unknown"] { opacity: .6; }
-.phase-yin[data-state="on"] { fill: #295d63; stroke: #9bfff1; filter: drop-shadow(0 0 4px #79f9dcbb) drop-shadow(0 0 9px #79f9dc55); }
-.phase-yang[data-state="on"] { fill: #fff1ca; stroke: #fff8e6; filter: drop-shadow(0 0 4px #ffdd8dbb) drop-shadow(0 0 9px #ffdd8d55); }
+.phase-yin[data-state="on"] { fill: #347e7a; stroke: #d4fff5; filter: drop-shadow(0 0 3px #a2ffeaff) drop-shadow(0 0 9px #79f9dccc) drop-shadow(0 0 20px #79f9dc99); }
+.phase-yang[data-state="on"] { fill: #fff5da; stroke: #fffdf3; filter: drop-shadow(0 0 3px #fff0c4ff) drop-shadow(0 0 9px #ffdd8dcc) drop-shadow(0 0 20px #ffdd8d99); }
 .phase-yin[data-state="on"] .phase-eye { fill: #b9fff2; }
 .phase-yang[data-state="on"] .phase-eye { fill: #8d6c35; }
 .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-size: 15px; font-weight: 550; text-decoration: none; letter-spacing: .025em; }
