@@ -30,7 +30,12 @@ a:focus-visible, button:focus-visible, .chart-plot:focus-visible { outline: 3px 
 main { width: min(1120px, calc(100% - 96px)); margin: 0 auto; padding: 43px 0 26px; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .header-status { display: flex; align-items: center; justify-content: flex-end; gap: 20px; min-width: 0; }
-.phase-indicator { width: 54px; height: 54px; flex: 0 0 auto; }
+.phase-indicator { position: relative; isolation: isolate; width: 72px; height: 72px; flex: 0 0 auto; }
+.phase-indicator::before, .phase-indicator::after { content: ""; position: absolute; inset: -32px; z-index: -1; border-radius: 50%; pointer-events: none; opacity: 0; filter: blur(10px); transition: opacity .25s ease; }
+.phase-indicator::before { background: radial-gradient(ellipse at 34% 65%, #00ffb3 0%, #00ffb3cc 22%, #00ffb370 42%, #00ffb300 70%); }
+.phase-indicator::after { background: radial-gradient(ellipse at 66% 35%, #ffc21a 0%, #ffc21acc 22%, #ffc21a70 42%, #ffc21a00 70%); }
+.phase-indicator:has(.phase-yin[data-state="on"])::before, .phase-indicator:has(.phase-yang[data-state="on"])::after { opacity: 1; animation: phase-aura 2.4s ease-in-out infinite; }
+@keyframes phase-aura { 0%, 100% { opacity: .75; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.12); } }
 .phase-indicator svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .phase { stroke-width: .8; stroke-linejoin: round; transition: fill .5s ease, stroke .5s ease, filter .5s ease; }
 .phase-yin { fill: #202e3b; stroke: #607589; }
@@ -38,9 +43,9 @@ main { width: min(1120px, calc(100% - 96px)); margin: 0 auto; padding: 43px 0 26
 .phase-yin .phase-eye { fill: #b4c2d0; stroke: none; }
 .phase-yang .phase-eye { fill: #202e3b; stroke: none; }
 .phase[data-state="unknown"] { opacity: .6; }
-.phase[data-state="on"] { stroke-width: 1.8; filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px var(--phase-glow)) drop-shadow(0 0 12px var(--phase-glow)) drop-shadow(0 0 24px var(--phase-glow)); }
-.phase-yin[data-state="on"] { --phase-glow: #20ffb9; fill: #68ffdb; stroke: #e3fff7; }
-.phase-yang[data-state="on"] { --phase-glow: #ffb52b; fill: #ffe6a3; stroke: #fffdf0; }
+.phase[data-state="on"] { stroke-width: 2.5; filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px var(--phase-glow)) drop-shadow(0 0 12px var(--phase-glow)) drop-shadow(0 0 24px var(--phase-glow)); }
+.phase-yin[data-state="on"] { --phase-glow: #20ffb9; fill: #8bffe3; stroke: #fff; }
+.phase-yang[data-state="on"] { --phase-glow: #ffb52b; fill: #ffedbc; stroke: #fff; }
 .phase-yin[data-state="on"] .phase-eye { fill: #123e36; }
 .phase-yang[data-state="on"] .phase-eye { fill: #66420d; }
 .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-size: 15px; font-weight: 550; text-decoration: none; letter-spacing: .025em; }
@@ -202,7 +207,8 @@ footer .dot { width: 5px; height: 5px; color: var(--soft); }
   main { width: calc(100% - 36px); padding-top: 24px; }
   .topbar { gap: 12px; }
   .header-status { gap: 12px; }
-  .phase-indicator { width: 42px; height: 42px; }
+  .phase-indicator { width: 54px; height: 54px; }
+  .phase-indicator::before, .phase-indicator::after { inset: -10px; }
   .brand { font-size: 13px; }
   .brand .icon { width: 18px; height: 18px; }
   .health-pill { font-size: 10px; padding: 8px 10px; gap: 6px; }
@@ -259,4 +265,4 @@ footer .dot { width: 5px; height: 5px; color: var(--soft); }
   .service-footnote { font-size: 9px; }
   footer { flex-direction: column; align-items: flex-start; gap: 8px; font-size: 9px; margin-top: 24px; }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+@media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
