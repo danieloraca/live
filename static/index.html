@@ -26,7 +26,21 @@
   <main>
     <header class="topbar">
       <a class="brand" href="/" aria-label="Pi Status home"><svg class="icon"><use href="#i-cpu"/></svg><span>pi<span class="brand-slash">/</span>status</span></a>
-      <span class="health-pill" id="health" role="status"><span class="dot"></span><span id="health-text">Connecting to your Pi</span></span>
+      <div class="header-status">
+        <span class="health-pill" id="health" role="status"><span class="dot"></span><span id="health-text">Connecting to your Pi</span></span>
+        <div class="phase-indicator" id="phase-indicator" role="img" aria-label="Yin: awaiting data. Yang: awaiting data." title="Yin: awaiting data. Yang: awaiting data.">
+          <svg viewBox="0 0 64 64" aria-hidden="true">
+            <g class="phase phase-yin" id="phase-yin" data-state="unknown">
+              <path d="M32 2a30 30 0 0 0 0 60a15 15 0 0 0 0-30a15 15 0 0 1 0-30Z"/>
+              <circle class="phase-eye" cx="32" cy="47" r="4.5"/>
+            </g>
+            <g class="phase phase-yang" id="phase-yang" data-state="unknown">
+              <path d="M32 2a30 30 0 0 1 0 60a15 15 0 0 0 0-30a15 15 0 0 1 0-30Z"/>
+              <circle class="phase-eye" cx="32" cy="17" r="4.5"/>
+            </g>
+          </svg>
+        </div>
+      </div>
     </header>
 
     <section class="intro" aria-labelledby="page-title">

@@ -36,6 +36,21 @@ function setHealth(label, level = "") {
   $("health").className = "health-pill" + (level ? " " + level : "");
 }
 
+// The future service adapter can supply optional boolean phases on /api/status.
+// Missing or invalid readings stay unknown rather than being mistaken for off.
+function renderPhases(phases) {
+  const labels = [];
+  for (const name of ["yin", "yang"]) {
+    const value = phases?.[name];
+    const state = value === true ? "on" : value === false ? "off" : "unknown";
+    $("phase-" + name).dataset.state = state;
+    labels.push((name === "yin" ? "Yin" : "Yang") + ": " + (state === "unknown" ? "awaiting data" : state));
+  }
+  const description = labels.join(". ") + ".";
+  $("phase-indicator").setAttribute("aria-label", description);
+  $("phase-indicator").title = description;
+}
+
 function health(data, stale) {
   if (stale) { setHealth("Live data is delayed", "warning"); return; }
   const services = data.services;
@@ -256,7 +271,9 @@ async function refresh() {
     connectionFailed = false;
     lastSuccess = Date.now();
     render(data);
+    renderPhases(Date.now() / 1000 - data.metrics.timestamp > 20 ? null : data.phases);
   } catch {
+    renderPhases();
     connectionFailed = true;
     needsHistory = true;
     setHealth("Connection lost", "offline");
@@ -301,6 +318,7 @@ setInterval(() => {
     text("live-text", "delayed");
     $("live-indicator").classList.add("warning");
     setHealth("Live data is delayed", "warning");
+    renderPhases();
   }
 }, 5000);
 refresh();

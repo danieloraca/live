@@ -167,6 +167,19 @@ No visitor tracking is enabled.
 Metric definitions: [Linux proc documentation](https://docs.kernel.org/filesystems/proc.html)
 and [Raspberry Pi firmware status](https://www.raspberrypi.com/documentation/computers/os.html#get_throttled).
 
+## Header phase indicator
+
+The yin-yang in the top-right header displays two independent phases. Yin glows
+mint and yang glows warm white when on; off phases have no glow. Until the
+external data service is connected, both remain neutral with an “awaiting data”
+description available on hover and to screen readers.
+
+The browser accepts an optional `phases` object on `/api/status`, for example
+`"phases": {"yin": true, "yang": false}`. Only boolean values mean on or off;
+missing, null, or invalid values mean unknown. A lost or delayed dashboard
+connection clears the indicator to unknown. The backend does not yet supply
+these values; the external service integration will be added separately.
+
 ## Verification
 
 ~~~sh
