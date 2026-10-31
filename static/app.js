@@ -30,13 +30,14 @@ let rangeChanged = false;
 let connectionFailed = false;
 let lastServiceSignature = "";
 let lastSuccess = 0;
+let refreshingPhases = false;
 
 function setHealth(label, level = "") {
   text("health-text", label);
   $("health").className = "health-pill" + (level ? " " + level : "");
 }
 
-// The comm journal supplies independent boolean phases on /api/status.
+// Phase updates run independently of the slower hardware and chart requests.
 // Missing or invalid readings stay unknown rather than being mistaken for off.
 function renderPhases(phases) {
   const labels = [];
@@ -228,10 +229,22 @@ function renderCharts() {
   text("history-caption", historyFailed ? "Saved history unavailable · retrying" : loading ? "Loading saved history…" : "Last " + label + " · " + detail);
 }
 
-async function request(path) {
-  const response = await fetch(path, { cache: "no-store", signal: AbortSignal.timeout(7000) });
+async function request(path, timeout = 7000) {
+  const response = await fetch(path, { cache: "no-store", signal: AbortSignal.timeout(timeout) });
   if (!response.ok) throw new Error("HTTP " + response.status);
   return response.json();
+}
+
+async function refreshPhases() {
+  if (document.hidden || refreshingPhases) return;
+  refreshingPhases = true;
+  try {
+    renderPhases(await request("/api/phases", 1500));
+  } catch {
+    renderPhases();
+  } finally {
+    refreshingPhases = false;
+  }
 }
 
 async function refresh() {
@@ -271,9 +284,7 @@ async function refresh() {
     connectionFailed = false;
     lastSuccess = Date.now();
     render(data);
-    renderPhases(Date.now() / 1000 - data.metrics.timestamp > 20 ? null : data.phases);
   } catch {
-    renderPhases();
     connectionFailed = true;
     needsHistory = true;
     setHealth("Connection lost", "offline");
@@ -310,7 +321,7 @@ document.querySelectorAll("[data-minutes]").forEach((button) => {
 });
 $("refresh").addEventListener("click", () => { needsHistory = true; refresh(); });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) { needsHistory = true; refresh(); }
+  if (!document.hidden) { needsHistory = true; refresh(); refreshPhases(); }
 });
 setInterval(() => {
   if (!document.hidden) refresh();
@@ -318,7 +329,8 @@ setInterval(() => {
     text("live-text", "delayed");
     $("live-indicator").classList.add("warning");
     setHealth("Live data is delayed", "warning");
-    renderPhases();
   }
 }, 5000);
+setInterval(refreshPhases, 250);
+refreshPhases();
 refresh();

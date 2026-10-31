@@ -31,13 +31,13 @@ main { width: min(1120px, calc(100% - 96px)); margin: 0 auto; padding: 43px 0 26
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .header-status { display: flex; align-items: center; justify-content: flex-end; gap: 20px; min-width: 0; }
 .phase-indicator { position: relative; isolation: isolate; width: 54px; height: 54px; flex: 0 0 auto; }
-.phase-indicator::before, .phase-indicator::after { content: ""; position: absolute; inset: -18px; z-index: -1; border-radius: 50%; pointer-events: none; opacity: 0; filter: blur(8px); transition: opacity .25s ease; }
+.phase-indicator::before, .phase-indicator::after { content: ""; position: absolute; inset: -18px; z-index: -1; border-radius: 50%; pointer-events: none; opacity: 0; filter: blur(8px); transition: opacity .15s ease; }
 .phase-indicator::before { background: radial-gradient(ellipse at 34% 65%, #00ffb3 0%, #00ffb3cc 22%, #00ffb370 42%, #00ffb300 70%); }
 .phase-indicator::after { background: radial-gradient(ellipse at 66% 35%, #ffc21a 0%, #ffc21acc 22%, #ffc21a70 42%, #ffc21a00 70%); }
 .phase-indicator:has(.phase-yin[data-state="on"])::before, .phase-indicator:has(.phase-yang[data-state="on"])::after { opacity: .5; animation: phase-aura 2.4s ease-in-out infinite; }
 @keyframes phase-aura { 0%, 100% { opacity: .35; transform: scale(.95); } 50% { opacity: .6; transform: scale(1.05); } }
 .phase-indicator svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.phase { stroke-width: .8; stroke-linejoin: round; transition: fill .5s ease, stroke .5s ease, filter .5s ease; }
+.phase { stroke-width: .8; stroke-linejoin: round; transition: fill .15s ease, stroke .15s ease, filter .15s ease; }
 .phase-yin { fill: #202e3b; stroke: #607589; }
 .phase-yang { fill: #b4c2d0; stroke: #d5e1ec; }
 .phase-yin .phase-eye { fill: #b4c2d0; stroke: none; }

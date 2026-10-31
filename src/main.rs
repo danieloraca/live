@@ -17,6 +17,7 @@ const INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Default)]
 struct State {
     status: String,
+    phases: Arc<RwLock<phases::State>>,
 }
 
 fn main() -> Result<(), history::Error> {
@@ -37,6 +38,10 @@ fn serve() -> Result<(), history::Error> {
         signal_hook::flag::register(signal, Arc::clone(&stopping))?;
     }
     let state = Arc::new(RwLock::new(State::default()));
+    let phase_watchers = phases::watch(
+        Arc::clone(&state.read().unwrap().phases),
+        Arc::clone(&stopping),
+    );
     let sampler_state = Arc::clone(&state);
     let sampler_history = Arc::clone(&history);
     let sampler_stopping = Arc::clone(&stopping);
@@ -80,6 +85,9 @@ fn serve() -> Result<(), history::Error> {
     }
     stopping.store(true, Ordering::Relaxed);
     sampler.thread().unpark();
+    for watcher in phase_watchers {
+        let _ = watcher.join();
+    }
     sampler
         .join()
         .map_err(|_| std::io::Error::other("Sampler failed"))??;
@@ -103,7 +111,7 @@ fn sample(
             services_updated_at = util::now();
         }
         let snapshot = collector.collect(cycle.is_multiple_of(6));
-        let phase_data = phases::collect();
+        let phase_data = state.read().unwrap().phases.read().unwrap().json();
         let history_status = {
             let mut history = history.lock().unwrap();
             history.record(snapshot.point());
@@ -154,6 +162,11 @@ fn route(
             200,
             "text/javascript; charset=utf-8",
             include_str!("../static/charts.mjs").into(),
+        ),
+        "/api/phases" => (
+            200,
+            "application/json",
+            state.read().unwrap().phases.read().unwrap().json(),
         ),
         "/api/status" => {
             let state = state.read().unwrap();
@@ -259,6 +272,11 @@ mod tests {
         let history =
             Mutex::new(history::Store::open(&dir.path().join("history.sqlite3")).unwrap());
         assert_eq!(route("/api/status", &state, &history).0, 503);
+        assert_eq!(route("/api/phases", &state, &history).0, 200);
+        assert_eq!(
+            route("/api/phases", &state, &history).2,
+            "{\"yin\":null,\"yang\":null}"
+        );
         assert_eq!(route("/missing.js", &state, &history).0, 404);
         assert_eq!(route("/api/history?minutes=0", &state, &history).0, 400);
         assert!(

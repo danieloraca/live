@@ -34,14 +34,14 @@ impl Server {
         Self { child, address }
     }
 
-    fn status(&self) -> Option<Value> {
+    fn phases(&self) -> Option<Value> {
         let mut stream = TcpStream::connect(&self.address).ok()?;
         stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
         stream
             .set_write_timeout(Some(Duration::from_secs(2)))
             .ok()?;
         stream
-            .write_all(b"GET /api/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .write_all(b"GET /api/phases HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
             .ok()?;
         let mut response = String::new();
         stream.read_to_string(&mut response).ok()?;
@@ -52,12 +52,18 @@ impl Server {
     }
 
     fn expect(&mut self, expected: Value) {
-        let deadline = Instant::now() + Duration::from_secs(12);
+        self.expect_within(expected, Duration::from_secs(3));
+    }
+
+    fn expect_within(&mut self, expected: Value, timeout: Duration) {
+        let started = Instant::now();
+        let deadline = started + timeout;
         let mut last = None;
         while Instant::now() < deadline {
             assert!(self.child.try_wait().unwrap().is_none(), "server exited");
-            last = self.status().map(|status| status["phases"].clone());
+            last = self.phases();
             if last.as_ref() == Some(&expected) {
+                eprintln!("phases {expected} received after {:?}", started.elapsed());
                 return;
             }
             thread::sleep(Duration::from_millis(100));
@@ -103,17 +109,26 @@ fn comm_events_reach_the_status_api_and_restore_after_restart() {
     fs::write(
         &journalctl,
         r#"#!/bin/sh
-test ! -f "$PHASE_TEST_JOURNAL/fail" || exit 1
 test "$1" = '--unit=comm.service' || exit 1
 case "$*" in
-  *'--output=cat'*'--lines=1'*'--case-sensitive=yes'*'--grep'*) ;;
+  *'--output=cat'*'--lines=1'*'--follow'*'--case-sensitive=yes'*'--grep'*) ;;
   *) exit 1 ;;
 esac
 for pattern in "$@"; do
   case "$pattern" in
-    *'u1 (in|out)$') cat "$PHASE_TEST_JOURNAL/yin"; exit ;;
-    *'u2 (in|out)$') cat "$PHASE_TEST_JOURNAL/yang"; exit ;;
+    *'u1 (in|out)$') phase=yin; break ;;
+    *'u2 (in|out)$') phase=yang; break ;;
   esac
+done
+test -n "$phase" || exit 1
+last=unread
+while test ! -f "$PHASE_TEST_JOURNAL/fail"; do
+  current=$(cat "$PHASE_TEST_JOURNAL/$phase")
+  if test "$current" != "$last"; then
+    printf '%s\n' "$current"
+    last=$current
+  fi
+  sleep 0.02
 done
 exit 1
 "#,
@@ -127,17 +142,20 @@ exit 1
     server.expect(json!({"yin": true, "yang": false}));
 
     event(directory, "yang", "\u{7}2026-10-31 16:10:00 u2 in\n");
-    server.expect(json!({"yin": true, "yang": true}));
+    server.expect_within(json!({"yin": true, "yang": true}), Duration::from_secs(1));
     event(directory, "yin", "\u{7}2026-10-31 16:10:10 u1 out\n");
-    server.expect(json!({"yin": false, "yang": true}));
+    server.expect_within(json!({"yin": false, "yang": true}), Duration::from_secs(1));
     event(directory, "yang", "\u{7}2026-10-31 16:10:20 u2 out\n");
-    server.expect(json!({"yin": false, "yang": false}));
+    server.expect_within(json!({"yin": false, "yang": false}), Duration::from_secs(1));
 
-    event(directory, "yin", "u1 in\n");
-    event(directory, "yang", "");
-    server.expect(json!({"yin": true, "yang": null}));
+    event(directory, "yin", "unrelated log message\n");
+    // Wait through a fixture read, then confirm noise did not change the state.
+    thread::sleep(Duration::from_millis(100));
+    server.expect(json!({"yin": false, "yang": false}));
     fs::write(directory.join("fail"), "").unwrap();
     server.expect(json!({"yin": null, "yang": null}));
+    event(directory, "yin", "u1 in\n");
+    event(directory, "yang", "");
     fs::remove_file(directory.join("fail")).unwrap();
     server.expect(json!({"yin": true, "yang": null}));
 

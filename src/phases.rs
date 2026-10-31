@@ -1,33 +1,107 @@
-use crate::util::{command, number, object};
+use crate::util::{number, object};
+use std::io::{BufRead, BufReader, Read};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock, mpsc};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-// Read each user's most recent matching event independently: a busy u2 must
-// never push u1's last event out of a shared, fixed-size log window.
-pub fn collect() -> String {
-    object(&[
-        ("yin", number(latest("u1"))),
-        ("yang", number(latest("u2"))),
-    ])
+#[derive(Default)]
+pub struct State {
+    values: [Option<bool>; 2],
 }
 
-fn latest(user: &str) -> Option<bool> {
+impl State {
+    pub fn json(&self) -> String {
+        object(&[
+            ("yin", number(self.values[0])),
+            ("yang", number(self.values[1])),
+        ])
+    }
+}
+
+// Each stream restores its own last event, then follows new events without a
+// polling gap. The streams are shared by all browsers and independent of metrics.
+pub fn watch(state: Arc<RwLock<State>>, stopping: Arc<AtomicBool>) -> Vec<JoinHandle<()>> {
+    ["u1", "u2"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, user)| {
+            let state = Arc::clone(&state);
+            let stopping = Arc::clone(&stopping);
+            thread::spawn(move || follow(user, index, state, stopping))
+        })
+        .collect()
+}
+
+fn follow(user: &'static str, index: usize, state: Arc<RwLock<State>>, stopping: Arc<AtomicBool>) {
     let pattern = format!(
         "^\\x07*([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}} [0-9]{{2}}:[0-9]{{2}}:[0-9]{{2}} )?{user} (in|out)$"
     );
-    let output = command(
-        "journalctl",
-        &[
-            "--unit=comm.service",
-            "--no-pager",
-            "--quiet",
-            "--all",
-            "--output=cat",
-            "--lines=1",
-            "--case-sensitive=yes",
-            "--grep",
-            &pattern,
-        ],
-    )?;
-    parse(&output, user)
+    while !stopping.load(Ordering::Relaxed) {
+        let child = Command::new("journalctl")
+            .args([
+                "--unit=comm.service",
+                "--no-pager",
+                "--quiet",
+                "--all",
+                "--output=cat",
+                "--lines=1",
+                "--follow",
+                "--case-sensitive=yes",
+                "--grep",
+                &pattern,
+            ])
+            .env("LC_ALL", "C")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+        if let Ok(mut child) = child {
+            let stdout = child.stdout.take().unwrap();
+            let (sender, receiver) = mpsc::sync_channel(16);
+            let reader = thread::spawn(move || {
+                let mut reader = BufReader::new(stdout);
+                loop {
+                    let mut message = String::new();
+                    // Bound malformed journal messages as well as queued events.
+                    match reader.by_ref().take(4096).read_line(&mut message) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) if !message.ends_with('\n') => break,
+                        Ok(_) => {
+                            if let Some(value) = parse(&message, user)
+                                && sender.send(value).is_err()
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+            while !stopping.load(Ordering::Relaxed) {
+                match receiver.recv_timeout(Duration::from_millis(100)) {
+                    Ok(value) => state.write().unwrap().values[index] = Some(value),
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        if !matches!(child.try_wait(), Ok(None)) {
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            drop(receiver);
+            let _ = reader.join();
+        }
+        state.write().unwrap().values[index] = None;
+        // A lost journal reader clears its phase, then restores the latest
+        // retained event on reconnect. Shutdown does not wait through the retry.
+        let retry = Instant::now() + Duration::from_secs(1);
+        while !stopping.load(Ordering::Relaxed) && Instant::now() < retry {
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
 }
 
 fn parse(message: &str, user: &str) -> Option<bool> {

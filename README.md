@@ -135,6 +135,8 @@ Read-only endpoints:
 
 - GET /api/status: current metrics, machine details, services, and history save
   status (`state`, `persisted_through`, `pending_samples`, `dropped_samples`).
+- GET /api/phases: the latest cached phase states, available independently of
+  hardware sampling and history queries.
 - GET /api/history?minutes=60: an object with `points`, `resolution_seconds`, and
   `summary` (per-metric `average`, `peak`, and valid `samples` count).
   Supported minute values: `15`, `60` (default), `1440`, `10080`, `43200`.
@@ -173,19 +175,25 @@ The yin-yang in the top-right header displays two independent phases. Yin glows
 mint and yang glows warm white when on; off phases have no glow. The source is
 the systemd journal for `comm.service`.
 
-Every five seconds, the sampler reads each phase's latest matching journal
-message independently. Unrelated messages are ignored. The latest retained
-event restores each phase after a
-dashboard restart, including events from earlier boots if the journal retains
-them. A phase keeps its state until its next event; an old `in` does not expire.
-The browser also refreshes every five seconds, so a change normally appears
-within about ten seconds; shorter transitions can fall between samples.
+Two shared journal followers restore each phase's latest retained event, then
+update an in-memory cache as new messages arrive. Unrelated messages are ignored.
+Events from earlier boots can restore state if the journal retains them. A phase
+keeps its state until its next event; an old `in` does not expire.
 
-The backend supplies a `phases` object on `/api/status`, for example
-`"phases": {"yin": true, "yang": false}`. Only boolean values mean on or off;
-missing, null, or invalid values mean unknown. A lost or delayed dashboard
-connection clears the indicator to unknown. No matching event, an unreadable
-journal, or a failed/timed-out query leaves that phase neutral with an
+While visible, the browser checks `/api/phases` every 250 milliseconds, with at
+most one phase request in flight. This runs independently of the five-second
+hardware refresh and chart-history requests. The glow fades in/out over 150
+milliseconds. Network delays can still affect response time, and transitions
+shorter than the browser's polling interval may be missed. Hidden tabs pause
+phase polling and refresh immediately when visible again.
+
+`/api/phases` returns an object such as `{"yin": true, "yang": false}`;
+`/api/status` also includes a `phases` snapshot at its normal sampling interval.
+Only boolean values mean on or off; missing, null, or invalid values mean
+unknown. Failed phase requests time out after 1.5 seconds and clear the indicator
+to unknown. If a journal follower exits, its phase clears and the follower
+restarts after one second, restoring the latest retained event. No matching
+event or an unreadable journal leaves that phase neutral with an
 “awaiting data” description on hover and for screen readers.
 
 The service user (`danutz` in `deploy/live.service`) must already have read
@@ -197,8 +205,9 @@ journalctl -u comm.service --no-pager --all -n 10 -o cat
 
 The dashboard never invokes sudo or changes journal permissions. Queries use
 [journalctl's message filter](https://www.freedesktop.org/software/systemd/man/latest/journalctl.html#-g),
-request only the newest matching event for each phase, and have a two-second
-timeout each. There is no per-browser journal process or separate phase database.
+restore only the newest matching event for each phase before following new
+messages. Followers are stopped and reaped on shutdown. There is no per-browser
+journal process or separate phase database.
 
 ## Verification
 
