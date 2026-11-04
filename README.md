@@ -11,8 +11,8 @@ The dashboard includes:
 - Root filesystem usage, load averages, CPU clock, swap, and process count.
 - Download/upload rates and interface transfer totals.
 - Raspberry Pi throttling and undervoltage warnings when vcgencmd is available.
-- Configured app links, including Elite on port 3141, with their systemd states,
-  HTTP response times, and last replies.
+- Configured app links, including Dreamer on port 3445, with their systemd states,
+  availability checks, response times, and last-seen timestamps.
 
 ## Run
 
@@ -154,10 +154,27 @@ baseline. Root disk availability excludes reserved space.
 
 Service state reflects systemd. For each active service, the dashboard also
 requests its configured health path over HTTP on the address bound by its local
-listener, with a bounded timeout. JiraPi uses `/healthz`; other apps use `/`.
+listener, with a bounded timeout. JiraPi uses `/healthz`; HTTP apps use `/`.
 A 2xx–4xx response updates its last reply; 5xx responses and timeouts warn.
 The 404 at IP Location's API-only root is therefore visible without marking
-the service unreachable. Last-reply times reset when this dashboard restarts.
+the service unreachable.
+
+Dreamer (`dreamer.service`, port 3445) is an authenticated MCP service with no
+browser UI. Its `/health` endpoint also requires authentication. To keep credentials
+out of this dashboard, Dreamer uses a token-free TCP connection check plus the
+existing systemd state. The row shows `TCP open` or `TCP unavailable` rather than
+HTTP health, and is not a browser link. The dashboard and CLI explicitly leave
+MCP authentication and database health **unverified**, even when the port is open.
+An unauthorized HTTP response is never used as Dreamer's health signal. Native
+MCP clients connect to `http://<pi-address>:3445/mcp` with their own bearer token;
+the dashboard neither loads nor forwards tokens. A listening socket alone does
+not prove a successful MCP request or a working database.
+
+In `/api/status`, service entries add `check` (`http` or `tcp`) and
+`tcp_connected` (`true`/`false` for a checked TCP listener, otherwise `null`).
+Dreamer's `http_status` stays `null`; `latency_ms` is its TCP connection time.
+`last_response` tracks the last successful TCP connection for Dreamer and the
+last 2xx–4xx HTTP reply for HTTP apps. Last-seen times reset on dashboard restart.
 Ports are detected from the main process's TCP listeners when
 permissions allow. Configured ports remain fallbacks for wrapper/container
 services. Configure entries in src/services.rs. System commands are bounded to
@@ -216,7 +233,7 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings
 node --check static/app.js
-node --test tests/charts.test.mjs
+node --test tests/*.test.mjs
 python3 tests/history_restart.py
 ~~~
 

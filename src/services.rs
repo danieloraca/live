@@ -5,19 +5,37 @@ use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Copy)]
+enum Check {
+    Http(&'static str),
+    // Availability only: authenticated MCP/database health remains unverified.
+    Tcp,
+}
+
 // Ports are fallbacks when systemd's main process is a wrapper (for example Docker).
-const SERVICES: &[(&str, &str, u16, &str)] = &[
-    ("iploc.service", "IP Location", 3000, "/"),
-    ("id-generator.service", "ID Generator", 3012, "/"),
-    ("tetris.service", "Tetris", 3020, "/"),
-    ("solitaire.service", "Solitaire", 3021, "/"),
-    ("dario.service", "Dario", 3041, "/"),
-    ("trader-dashboard.service", "Trader Dashboard", 3040, "/"),
-    ("elite.service", "Elite", 3141, "/"),
-    ("sym_notes.service", "Sym Notes", 3444, "/"),
-    ("jirpi.service", "JiraPi", 5644, "/healthz"),
-    ("token-grove.service", "Token Grove", 9988, "/"),
-    ("live.service", "Live Status", 9999, "/"),
+const SERVICES: &[(&str, &str, u16, Check)] = &[
+    ("iploc.service", "IP Location", 3000, Check::Http("/")),
+    (
+        "id-generator.service",
+        "ID Generator",
+        3012,
+        Check::Http("/"),
+    ),
+    ("tetris.service", "Tetris", 3020, Check::Http("/")),
+    ("solitaire.service", "Solitaire", 3021, Check::Http("/")),
+    ("dario.service", "Dario", 3041, Check::Http("/")),
+    (
+        "trader-dashboard.service",
+        "Trader Dashboard",
+        3040,
+        Check::Http("/"),
+    ),
+    ("elite.service", "Elite", 3141, Check::Http("/")),
+    ("sym_notes.service", "Sym Notes", 3444, Check::Http("/")),
+    ("dreamer.service", "Dreamer", 3445, Check::Tcp),
+    ("jirpi.service", "JiraPi", 5644, Check::Http("/healthz")),
+    ("token-grove.service", "Token Grove", 9988, Check::Http("/")),
+    ("live.service", "Live Status", 9999, Check::Http("/")),
 ];
 
 fn properties(output: &str) -> BTreeMap<String, BTreeMap<String, String>> {
@@ -88,14 +106,25 @@ pub struct Collector {
 #[derive(Default)]
 struct Probe {
     status: Option<u16>,
+    tcp_connected: Option<bool>,
     latency_ms: Option<f64>,
 }
 
-fn probe(address: SocketAddr, path: &str) -> Probe {
+fn probe(address: SocketAddr, check: Check) -> Probe {
     let timeout = Duration::from_secs(2);
     let start = Instant::now();
     let Ok(mut stream) = TcpStream::connect_timeout(&address, timeout) else {
-        return Probe::default();
+        return Probe {
+            tcp_connected: matches!(check, Check::Tcp).then_some(false),
+            ..Probe::default()
+        };
+    };
+    let Check::Http(path) = check else {
+        return Probe {
+            tcp_connected: Some(true),
+            latency_ms: Some(start.elapsed().as_secs_f64() * 1000.0),
+            ..Probe::default()
+        };
     };
     let request = format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
     if stream.set_read_timeout(Some(timeout)).is_err()
@@ -121,6 +150,7 @@ fn probe(address: SocketAddr, path: &str) -> Probe {
     let status = parse_status(&response);
     Probe {
         status,
+        tcp_connected: None,
         latency_ms: status.map(|_| start.elapsed().as_secs_f64() * 1000.0),
     }
 }
@@ -157,7 +187,7 @@ impl Collector {
         let sockets = command("ss", &["-H", "-ltnp"]).unwrap_or_default();
         let entries = SERVICES
             .iter()
-            .map(|(unit, name, fallback, path)| {
+            .map(|(unit, name, fallback, check)| {
                 let values = units.get(*unit);
                 let get = |key: &str| values.and_then(|p| p.get(key)).map(String::as_str);
                 let state = if get("LoadState") == Some("not-found") {
@@ -177,7 +207,7 @@ impl Collector {
                     *name,
                     state,
                     probe_address(&sockets, port, pid),
-                    *path,
+                    *check,
                 )
             })
             .collect::<Vec<_>>();
@@ -185,10 +215,10 @@ impl Collector {
         let probes = thread::scope(|scope| {
             entries
                 .iter()
-                .map(|(_, _, state, address, path)| {
+                .map(|(_, _, state, address, check)| {
                     scope.spawn(move || {
                         if *state == "active" {
-                            probe(*address, path)
+                            probe(*address, *check)
                         } else {
                             Probe::default()
                         }
@@ -202,10 +232,13 @@ impl Collector {
         let rows = entries
             .into_iter()
             .zip(probes)
-            .map(|((unit, name, state, address, _path), probe)| {
-                let reachable = probe
-                    .status
-                    .is_some_and(|status| (200..500).contains(&status));
+            .map(|((unit, name, state, address, check), probe)| {
+                let reachable = match check {
+                    Check::Tcp => probe.tcp_connected == Some(true),
+                    Check::Http(_) => probe
+                        .status
+                        .is_some_and(|status| (200..500).contains(&status)),
+                };
                 if reachable {
                     self.last_response.insert(unit, now());
                 }
@@ -214,6 +247,19 @@ impl Collector {
                     ("name", quote(name)),
                     ("state", quote(state)),
                     ("port", address.port().to_string()),
+                    (
+                        "check",
+                        quote(match check {
+                            Check::Http(_) => "http",
+                            Check::Tcp => "tcp",
+                        }),
+                    ),
+                    (
+                        "tcp_connected",
+                        probe
+                            .tcp_connected
+                            .map_or("null".into(), |value| value.to_string()),
+                    ),
                     ("http_status", number(probe.status)),
                     ("latency_ms", number(probe.latency_ms)),
                     (
@@ -230,6 +276,61 @@ impl Collector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tcp_availability_sends_no_credentials_or_http_and_reports_failure() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = Vec::new();
+            stream.read_to_end(&mut request).unwrap();
+            assert!(request.is_empty());
+            // Keep the listener owned until the caller has received the result.
+            listener
+        });
+        let result = probe(address, Check::Tcp);
+        assert_eq!(result.tcp_connected, Some(true));
+        assert_eq!(result.status, None);
+        assert!(result.latency_ms.is_some());
+        drop(server.join().unwrap());
+        // Port zero cannot identify a listening service; avoid races from reusing
+        // a recently closed ephemeral port in another parallel test.
+        let result = probe(SocketAddr::from(([127, 0, 0, 1], 0)), Check::Tcp);
+        assert_eq!(result.tcp_connected, Some(false));
+        assert_eq!(result.status, None);
+        assert_eq!(result.latency_ms, None);
+    }
+
+    #[test]
+    fn http_probes_still_request_the_configured_health_path() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            assert!(request.starts_with(b"GET /healthz HTTP/1.1\r\n"));
+            assert!(!String::from_utf8_lossy(&request).contains("Authorization"));
+            stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                .unwrap();
+        });
+        let result = probe(address, Check::Http("/healthz"));
+        server.join().unwrap();
+        assert_eq!(result.status, Some(204));
+        assert_eq!(result.tcp_connected, None);
+    }
 
     #[test]
     fn sockets_match_exact_pid_and_parse_ipv6() {

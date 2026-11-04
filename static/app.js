@@ -1,3 +1,4 @@
+import { serviceCheck } from "./services.mjs";
 import { HistoryChart, known, percent, bytes, rate, frequency, summarize } from "./charts.mjs";
 
 const $ = (id) => document.getElementById(id);
@@ -59,8 +60,9 @@ function health(data, stale) {
   if (services.some((s) => s.state === "failed")) setHealth("A service needs attention", "warning");
   else if (!services.length || services.every((s) => s.state === "unknown")) setHealth("Service status unavailable", "warning");
   else if (active !== services.length) setHealth("Some services aren’t running", "warning");
-  else if (services.some((s) => s.state === "active" && (!known(s.http_status) || s.http_status >= 500))) setHealth("An app needs attention", "warning");
+  else if (services.some((s) => serviceCheck(s).needsAttention)) setHealth("An app needs attention", "warning");
   else if (known(data.metrics.throttled) && (data.metrics.throttled & 15)) setHealth("Hardware needs attention", "warning");
+  else if (services.some((s) => serviceCheck(s).unverified)) setHealth("Services running · MCP health unverified", "warning");
   else setHealth("All services running");
 }
 
@@ -86,21 +88,29 @@ function renderServices(services) {
     "trader-dashboard.service": "TR",
     "elite.service": "EL",
     "sym_notes.service": "SN",
+    "dreamer.service": "DR",
     "jirpi.service": "JP",
     "token-grove.service": "TG",
     "live.service": "PI",
   };
   const rows = services.map((service) => {
-    const link = document.createElement("a");
+    const tcp = service.check === "tcp";
+    const check = serviceCheck(service);
+    const link = document.createElement(tcp ? "div" : "a");
     link.className = "service-row";
     const url = new URL("/", window.location.href);
     url.port = String(service.port);
-    link.href = url.href;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    const http = known(service.http_status) ? "HTTP " + service.http_status + " · " + Math.round(service.latency_ms) + " ms" : service.state === "active" ? "No HTTP response" : "Not checked";
+    if (!tcp) {
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    } else {
+      link.setAttribute("role", "group");
+      link.title = "MCP endpoint: " + new URL("/mcp", url).href + ". Native client token required; MCP and database health are not checked.";
+    }
+    const http = check.label;
     const lastReply = known(service.last_response) ? new Date(service.last_response * 1000).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
-    link.setAttribute("aria-label", service.name + ", " + service.state + ", port " + service.port + ", " + http + ", last HTTP reply " + lastReply + ", opens in a new tab");
+    link.setAttribute("aria-label", service.name + ", " + service.state + ", port " + service.port + ", " + http + ", last " + (tcp ? "TCP connection " : "HTTP reply ") + lastReply + (tcp ? ", MCP authentication and database health unverified" : ", opens in a new tab"));
     const label = document.createElement("span");
     label.className = "service-label";
     const icon = document.createElement("span");
@@ -111,7 +121,7 @@ function renderServices(services) {
     const strong = document.createElement("strong");
     strong.textContent = service.name;
     const small = document.createElement("small");
-    small.textContent = service.unit;
+    small.textContent = service.unit + (tcp ? " · MCP · token required" : "");
     name.append(strong, small);
     label.append(icon, name);
     const port = document.createElement("span");
@@ -124,7 +134,7 @@ function renderServices(services) {
     dot.className = "dot";
     state.append(dot, document.createTextNode(service.state.charAt(0).toUpperCase() + service.state.slice(1)));
     const response = document.createElement("span");
-    response.className = "service-http" + (known(service.http_status) ? service.http_status < 400 ? " ok" : service.http_status < 500 ? " warning" : " error" : service.state === "active" ? " error" : "");
+    response.className = "service-http" + (check.level ? " " + check.level : "");
     response.textContent = http;
     const last = document.createElement("span");
     last.className = "service-last";
@@ -135,7 +145,8 @@ function renderServices(services) {
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
     use.setAttribute("href", "#i-arrow");
     arrow.append(use);
-    link.append(label, port, state, response, last, arrow);
+    link.append(label, port, state, response, last);
+    if (!tcp) link.append(arrow);
     return link;
   });
   $("service-list").replaceChildren(...rows);

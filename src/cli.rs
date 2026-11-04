@@ -159,6 +159,9 @@ struct Service {
     name: String,
     state: String,
     port: u16,
+    #[serde(default)]
+    check: String,
+    tcp_connected: Option<bool>,
     http_status: Option<u16>,
     latency_ms: Option<f64>,
 }
@@ -204,11 +207,7 @@ fn health(status: &Status) -> (&'static str, Color) {
     if status.services.iter().any(|s| s.state != "active") {
         return ("A service needs attention", Color::Yellow);
     }
-    if status
-        .services
-        .iter()
-        .any(|s| s.http_status.is_none_or(|code| code >= 500))
-    {
+    if status.services.iter().any(service_needs_attention) {
         return ("An app needs attention", Color::Yellow);
     }
     if status
@@ -217,6 +216,9 @@ fn health(status: &Status) -> (&'static str, Color) {
         .is_some_and(|flags| flags & 15 != 0)
     {
         return ("Hardware needs attention", Color::Red);
+    }
+    if status.services.iter().any(|s| s.check == "tcp") {
+        return ("Services running · MCP health unverified", Color::Yellow);
     }
     ("All services running", Color::Green)
 }
@@ -350,7 +352,25 @@ fn print_status(status: &Status) -> Result<(), Error> {
     Ok(())
 }
 
+fn service_needs_attention(service: &Service) -> bool {
+    if service.check == "tcp" {
+        service.tcp_connected != Some(true)
+    } else {
+        service.http_status.is_none_or(|code| code >= 500)
+    }
+}
+
 fn service_reply(service: &Service) -> String {
+    if service.check == "tcp" {
+        let availability = if service.state != "active" {
+            "Not checked"
+        } else if service.tcp_connected == Some(true) {
+            "TCP open"
+        } else {
+            "TCP unavailable"
+        };
+        return format!("{availability} · MCP health unverified (client token required)");
+    }
     service.http_status.map_or_else(
         || {
             if service.state == "active" {
@@ -636,12 +656,14 @@ fn draw_services(
 ) {
     let services = status.map_or(&[][..], |s| s.services.as_slice());
     let rows = services.iter().map(|service| {
-        let color =
-            if service.state != "active" || service.http_status.is_none_or(|code| code >= 500) {
-                Color::Yellow
-            } else {
-                Color::Green
-            };
+        let color = if service.state != "active"
+            || service_needs_attention(service)
+            || service.check == "tcp"
+        {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
         Row::new([
             service.name.clone(),
             format!(":{}", service.port),
@@ -662,7 +684,7 @@ fn draw_services(
         ],
     )
     .header(
-        Row::new(["App", "Port", "State", "HTTP"])
+        Row::new(["App", "Port", "State", "Availability"])
             .style(Style::default().add_modifier(Modifier::BOLD)),
     )
     .block(Block::default().title(title).borders(Borders::ALL))
@@ -683,6 +705,31 @@ mod tests {
         assert_eq!(status.metrics.tx, None);
         assert_eq!(status.services[0].port, 3000);
         assert_eq!(storage(status.metrics.disk.as_ref()), "—");
+    }
+
+    #[test]
+    fn tcp_availability_never_claims_authenticated_mcp_health() {
+        let mut status: Status = serde_json::from_str(SAMPLE).unwrap();
+        status.metrics.timestamp = now();
+        let service = &mut status.services[0];
+        service.check = "tcp".into();
+        service.tcp_connected = Some(true);
+        service.http_status = None;
+        assert!(!service_needs_attention(service));
+        assert!(service_reply(service).contains("TCP open · MCP health unverified"));
+        assert_eq!(
+            health(&status),
+            ("Services running · MCP health unverified", Color::Yellow)
+        );
+        status.services[0].tcp_connected = Some(false);
+        // An HTTP authentication response must not override a failed TCP check.
+        status.services[0].http_status = Some(401);
+        assert!(service_needs_attention(&status.services[0]));
+        assert!(service_reply(&status.services[0]).starts_with("TCP unavailable"));
+        assert_eq!(health(&status).0, "An app needs attention");
+        status.services[0].state = "inactive".into();
+        assert!(service_reply(&status.services[0]).starts_with("Not checked"));
+        assert_eq!(health(&status).0, "A service needs attention");
     }
 
     #[test]

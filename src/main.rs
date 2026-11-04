@@ -158,6 +158,11 @@ fn route(
             "text/javascript; charset=utf-8",
             include_str!("../static/app.js").into(),
         ),
+        "/services.mjs" => (
+            200,
+            "text/javascript; charset=utf-8",
+            include_str!("../static/services.mjs").into(),
+        ),
         "/charts.mjs" => (
             200,
             "text/javascript; charset=utf-8",
@@ -285,6 +290,7 @@ mod tests {
                 .starts_with("{\"points\":[],\"resolution_seconds\":5,")
         );
         assert_eq!(route("/charts.mjs", &state, &history).0, 200);
+        assert_eq!(route("/services.mjs", &state, &history).0, 200);
         assert!(route("/", &state, &history).2.contains("My Pi"));
     }
 }
